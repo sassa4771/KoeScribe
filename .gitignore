@@ -1,0 +1,43 @@
+# Python環境関連
+venv/
+.env
+__pycache__/
+*.pyc
+.ipynb_checkpoints
+
+# Whisperモデルファイル（容量が大きいため除外）
+models/
+*.pt
+*.pth
+
+# データフォルダ（動画・音声ファイル除外）
+data/
+audio/
+video/
+media/
+*.mp3
+*.mp4
+*.wav
+*.flac
+*.aac
+*.mov
+*.avi
+*.mkv
+
+# 出力データフォルダ
+output/
+
+# ログファイル
+*.log
+
+# IDE・エディタ関連
+.vscode/
+.idea/
+
+# 環境設定・シークレット情報
+.env*
+*.ini
+*.cfg
+
+/result
+secrets.json

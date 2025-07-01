@@ -1,0 +1,7 @@
+{
+  "root_dir": "./samples",
+  "audio_files": [
+    "Sample.m4a"
+  ],
+  "output_dir": "./result"
+}
