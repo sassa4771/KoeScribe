@@ -1,17 +1,14 @@
-# whisper-local-server_GPU
+# whisper-local-server_CPU
 
-Whisper を用いて日本語音声を文字起こしし、MeCab（UniDic辞書）で頻出名詞を解析するローカル処理ツールです。  
-GPUによる高速処理に対応しています。
+Whisper を用いて日本語音声を文字起こしするローカル処理ツールです。  
 
 ---
 
 ## 📦 主な機能
 
 - 🎙 Whisper による日本語音声の文字起こし（mp4など対応）
-- 📊 MeCab（UniDic）での頻出名詞ランキング出力
 - ⏱ 処理時間の自動記録
 - 📁 複数ファイルを `config.json` で一括処理
-- ⚡ CUDA対応GPUでの高速化
 
 ---
 
@@ -19,9 +16,7 @@ GPUによる高速処理に対応しています。
 
 ```
 whisper-local-server_GPUdesu/
-├── 01.gpu_info.py                    # GPUとCUDAの確認
-├── 02.run_transcription_whisper.py  # Whisperによる文字起こし
-├── 03.analyze_word_frequency.py     # MeCabで名詞頻度を解析
+├── run_transcription_whisper.py     # Whisperによる文字起こし
 ├── config.json                      # 音声ファイルと出力先の設定
 ├── samples/Sample.m4a               # テスト用サンプル音声
 ├── result/                          # 処理結果出力ディレクトリ
@@ -35,8 +30,8 @@ whisper-local-server_GPUdesu/
 ### 1. リポジトリをクローン
 
 ```bash
-git clone https://github.com/yourname/whisper-local-server_GPUdesu.git
-cd whisper-local-server_GPUdesu
+git clone https://github.com/IPTeCA/whisper-local-server_CPU.git
+cd whisper-local-server_CPU
 ```
 
 ### 2. Python仮想環境構築（pipenv）
@@ -50,59 +45,6 @@ pipenv run python -m unidic download
 
 - Windows: https://ffmpeg.org/download.html
 - Mac: `brew install ffmpeg`
-
----
-
-## 🧪 動作確認用スクリプト
-
-### GPUとCUDAが有効かを確認
-
-```bash
-pipenv run python 01.gpu_info.py
-```
-
-### 出力例
-
-```
-torch_version = 2.3.0
-cuda_available = True
-cuda_device_count = 1
-cuda_GPU_Num = 0
-GPU_Name = NVIDIA GeForce RTX 3070 Ti
-GPU_Compute_Capability = (8, 6)
-```
-
----
-
-## 🔍 GPUとCUDAバージョンの確認方法（Windows）
-
-### NVIDIAドライバとCUDAの確認：
-
-```bash
-nvidia-smi
-```
-
-表示例：
-
-```
-+-----------------------------------------------------------------------------+
-| NVIDIA-SMI 560.94     Driver Version: 560.94     CUDA Version: 12.6        |
-| GPU  Name              Memory-Usage   | GPU-Util | Temp   | Power           |
-| 0    RTX 3070 Ti       5738MiB / 8GB  | 9%       | 53°C   | 50W / 290W      |
-+-----------------------------------------------------------------------------+
-```
-
-### CUDA Toolkit バージョンを確認：
-
-```bash
-nvcc --version
-```
-
-出力例：
-
-```
-Cuda compilation tools, release 11.8, V11.8.89
-```
 
 ---
 
@@ -123,43 +65,31 @@ Cuda compilation tools, release 11.8, V11.8.89
 ### Whisperで音声文字起こし
 
 ```bash
-pipenv run python 02.run_transcription_whisper.py
+pipenv run python run_transcription_whisper.py
 ```
 
 生成ファイル例：
-- `result/output_sample/sample_transcription.txt`
-- `result/output_sample/sample_processing_time.txt`
+- `result/output_sample/Sample_transcription.txt`
+- `result/output_sample/Sample_processing_time.txt`
 
-### MeCabで名詞頻度解析
-
-```bash
-pipenv run python 03.analyze_word_frequency.py
-```
-
-生成ファイル例：
-- `result/output_sample/sample_word_frequency_mecab.txt`
-
----
 
 ## 📚 依存技術
 
 - OpenAI Whisper
 - PyTorch
-- MeCab（mecab-python3）
-- UniDic辞書
 - ffmpeg, pipenv
 
 ---
 
 ## ✅ 推奨環境（2025年時点）
 
-| 項目             | 推奨環境                    |
-|------------------|-----------------------------|
-| GPU              | NVIDIA GeForce RTX 30XX 以上 |
-| CUDA Toolkit     | 11.8                        |
-| PyTorch          | 2.3.0 (cu118)              |
-| Python           | 3.12                        |
-| OS               | Windows 10 / 11, WSL2可     |
+| 項目    | 推奨環境例                                                     |
+|---------|----------------------------------------------------------------|
+| CPU     | 8 コア以上／AVX2 対応 3 GHz 以上<br>例：Intel Core i7-12700、AMD Ryzen 7 5800X |
+| Memory  | 16 GB 以上（Whisper-large を扱うなら 32 GB 推奨）              |
+| PyTorch | 2.3.0 **CPU ビルド**<br>↳ `pip install torch==2.3.0+cpu`        |
+| Python  | 3.12（3.10 以上であれば可）                                    |
+| OS      | Windows 10/11（WSL2 可）／Linux／macOS                         |
 
 ---
 

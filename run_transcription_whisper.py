@@ -56,6 +56,6 @@ for idx, audio_filename in enumerate(tqdm(audio_files, desc="🎧 Transcribing",
         f"処理時間: {processing_time:.2f} 秒\n"
         f"実行デバイス: {model.device}"
     )
-    send_email_notification(subject, body)
-
+    
 print("\n✅ 全ての処理が完了しました。")
+
