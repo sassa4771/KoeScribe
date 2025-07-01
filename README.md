@@ -38,7 +38,6 @@ cd whisper-local-server_CPU
 
 ```bash
 pipenv install
-pipenv run python -m unidic download
 ```
 
 ### 3. ffmpeg をインストール（Whisper に必須）
