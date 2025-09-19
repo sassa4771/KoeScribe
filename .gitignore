@@ -14,3 +14,8 @@ dist/
 
 # Outputs
 outputs/
+
+# Packaging artifacts
+*.egg-info/
+dist/
+build/

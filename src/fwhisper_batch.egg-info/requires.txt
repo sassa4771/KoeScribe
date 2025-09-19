@@ -1,3 +1,0 @@
-faster-whisper>=1.0.1
-tqdm>=4.66.0
-webrtcvad>=2.0.10
