@@ -1,7 +1,7 @@
 {
   "root_dir": "./samples",
   "audio_files": [
-    "Sample.m4a"
+    "sample1.wav"
   ],
   "output_dir": "./outputs",
   "model_size": "large-v3",
