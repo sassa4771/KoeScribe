@@ -1,6 +1,6 @@
 {
-  "root_dir": "C:\\Users\\sasat\\Downloads",
-  "audio_files": ["新規録音 4.wav"],
+  "root_dir": "./samples",
+  "audio_files": ["Sample.m4a"],
   "output_dir": "./outputs",
 
   "model_size": "large-v3",

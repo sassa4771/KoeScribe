@@ -86,6 +86,47 @@ def write_txt_grouped(p_out: Path, labeled_segments: List[Dict[str, Any]]):
     p_out.parent.mkdir(parents=True, exist_ok=True)
     p_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+def assign_speakers_to_words(words: List[Dict[str, Any]], spans: List[Dict[str, Any]], smooth_min_sec: float = 0.6) -> List[Dict[str, Any]]:
+    """単語レベルで話者を割り当て（pipeline_all.py用）"""
+    return assign_speaker_to_segments(words, spans, min_overlap_ratio=0.3, prefer_containment=True)
+
+def to_runs(labeled_words: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """連続する同一話者の単語をまとめてrunに変換（pipeline_all.py用）"""
+    if not labeled_words:
+        return []
+    
+    runs = []
+    current_speaker = labeled_words[0].get("speaker", "UNK")
+    current_text = labeled_words[0].get("word", "")
+    current_start = labeled_words[0].get("start", 0.0)
+    current_end = labeled_words[0].get("end", 0.0)
+    
+    for word in labeled_words[1:]:
+        speaker = word.get("speaker", "UNK")
+        if speaker == current_speaker:
+            current_text += word.get("word", "")
+            current_end = word.get("end", current_end)
+        else:
+            runs.append({
+                "speaker": current_speaker,
+                "text": current_text,
+                "start": current_start,
+                "end": current_end
+            })
+            current_speaker = speaker
+            current_text = word.get("word", "")
+            current_start = word.get("start", 0.0)
+            current_end = word.get("end", 0.0)
+    
+    runs.append({
+        "speaker": current_speaker,
+        "text": current_text,
+        "start": current_start,
+        "end": current_end
+    })
+    
+    return runs
+
 def main():
     ap = argparse.ArgumentParser(description="Assign speaker labels to segments.jsonl using spans.jsonl")
     ap.add_argument("--segments", required=True, help="*_segments.jsonl (ASR 出力)")

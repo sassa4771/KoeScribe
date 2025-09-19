@@ -4,11 +4,12 @@ import time
 import json
 import argparse
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from faster_whisper import WhisperModel
 import ctranslate2
 from tqdm import tqdm
+from dotenv import load_dotenv
 
 
 def detect_device() -> str:
@@ -50,6 +51,56 @@ def write_jsonl(path: Path, rows: List[Dict[str, Any]]):
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+def is_diarization_enabled(cfg: Dict[str, Any]) -> bool:
+    """Check if diarization is enabled based on config"""
+    return bool(cfg.get("diarize_model")) and bool(os.getenv("HUGGINGFACE_TOKEN"))
+
+
+def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], words: List[Dict[str, Any]]) -> Optional[str]:
+    """Perform diarization and merge with ASR results"""
+    try:
+        from tools.diarize import diarize_one
+        from tools.merge_speakers import assign_speakers_to_words, to_runs
+        
+        token = os.getenv("HUGGINGFACE_TOKEN")
+        if not token:
+            print(f"[warning] HUGGINGFACE_TOKEN not set, skipping diarization for {audio_path.name}")
+            return None
+            
+        spans_path = out_dir / "spans.jsonl"
+        diarize_model = cfg.get("diarize_model", "pyannote/speaker-diarization")
+        min_dur = float(cfg.get("diarize_min_dur", 0.8))
+        bridge_gap = float(cfg.get("diarize_bridge_gap", 0.3))
+        
+        diarize_one(audio_path, spans_path, diarize_model, token, min_dur, bridge_gap)
+        
+        spans = []
+        if spans_path.exists():
+            with spans_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        spans.append(json.loads(line))
+        
+        labeled_words = assign_speakers_to_words(words, spans, smooth_min_sec=0.6)
+        write_jsonl(out_dir / f"{audio_path.stem}_words_with_speakers.jsonl", labeled_words)
+        
+        runs = to_runs(labeled_words)
+        speaker_transcript_path = out_dir / f"{audio_path.stem}_speaker_transcription.txt"
+        with speaker_transcript_path.open("w", encoding="utf-8") as f:
+            for r in runs:
+                f.write(f"[{r['speaker']}] {r['text'].strip()}\n")
+        
+        return str(speaker_transcript_path)
+        
+    except ImportError as e:
+        print(f"[warning] Diarization dependencies not available: {e}")
+        return None
+    except Exception as e:
+        print(f"[warning] Diarization failed for {audio_path.name}: {e}")
+        return None
+
+
 def transcribe_one(
     model: WhisperModel,
     audio_path: Path,
@@ -60,6 +111,8 @@ def transcribe_one(
     min_silence_ms: int,
     word_timestamps: bool,
     show_progress: bool = True,
+    enable_diarization: bool = False,
+    diarization_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     1ファイルを文字起こしして出力一式を保存する。
@@ -67,6 +120,8 @@ def transcribe_one(
     - JSONL: <stem>_segments.jsonl
     - JSONL: <stem>_words.jsonl（word_timestamps=True の時だけ）
     - TXT: <stem>_processing_time.txt
+    - TXT: <stem>_speaker_transcription.txt（enable_diarization=True の時だけ）
+    - JSONL: <stem>_words_with_speakers.jsonl（enable_diarization=True の時だけ）
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -136,16 +191,23 @@ def transcribe_one(
     ]
     (out_dir / f"{audio_path.stem}_processing_time.txt").write_text("\n".join(stats) + "\n", encoding="utf-8")
 
-    return {
+    result = {
         "text": text,
         "processing_time": proc_time,
         "language": getattr(info, "language", None),
         "duration": getattr(info, "duration", None),
         "words_count": len(rows_words),
     }
+    
+    if enable_diarization and diarization_config and rows_words:
+        speaker_transcript = diarize_and_merge(audio_path, out_dir, diarization_config, rows_words)
+        result["speaker_transcript"] = speaker_transcript
+    
+    return result
 
 
 def main():
+    load_dotenv()  # Load .env file for HUGGINGFACE_TOKEN
     parser = argparse.ArgumentParser(description="Batch transcription with Faster-Whisper (uv)")
     parser.add_argument("--config", type=str, default="config.json", help="Path to config.json")
     parser.add_argument("--root", type=str, help="Override root_dir")
@@ -153,6 +215,7 @@ def main():
     parser.add_argument("--files", nargs="*", help="Override audio files list")
     parser.add_argument("--word-timestamps", action="store_true", help="Export per-word timestamps (also writes *_words.jsonl)")
     parser.add_argument("--no-progress", action="store_true", help="Disable per-file progress bar")
+    parser.add_argument("--disable-diarization", action="store_true", help="Disable speaker diarization even if configured")
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
@@ -171,6 +234,12 @@ def main():
     device = resolve_device(device_cfg)
     compute_type = resolve_compute_type(device, compute_cfg)
 
+    enable_diarization = (not args.disable_diarization) and is_diarization_enabled(cfg)
+    if enable_diarization:
+        print("[info] Speaker diarization enabled")
+    else:
+        print("[info] Speaker diarization disabled")
+
     print(f"[fwhisper] model={model_size} device={device} compute_type={compute_type}")
     model = WhisperModel(model_size, device=device, compute_type=compute_type)
 
@@ -181,6 +250,9 @@ def main():
 
     for idx, p in enumerate(tqdm(inputs, desc="🎧 Transcribing", unit="file"), start=1):
         target_out = out_dir / f"output_{p.stem}"
+        
+        use_word_timestamps = args.word_timestamps or enable_diarization
+        
         result = transcribe_one(
             model,
             p,
@@ -189,14 +261,18 @@ def main():
             beam_size,
             use_vad,
             min_silence,
-            args.word_timestamps,
+            use_word_timestamps,
             show_progress=(not args.no_progress),
+            enable_diarization=enable_diarization,
+            diarization_config=cfg if enable_diarization else None,
         )
         preview = result["text"][:500]
         print(f"\n=== {idx}/{len(inputs)} Done: {p.name} ===")
         print(preview + ("..." if len(result["text"]) > len(preview) else ""))
-        if args.word_timestamps:
+        if use_word_timestamps:
             print(f"words.jsonl: {result['words_count']} words")
+        if enable_diarization and result.get("speaker_transcript"):
+            print(f"speaker transcription: {result['speaker_transcript']}")
 
 if __name__ == "__main__":
     main()
