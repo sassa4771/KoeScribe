@@ -81,9 +81,40 @@ uv run python ./src/fwhisper_batch/transcribe_batch.py --config config.json
 
 ---
 
+## ⚡ GPU / CPU の自動判定と出力ログ
+- 既定（`"device": "auto"`）では **CUDA GPU が見つかれば `cuda`、無ければ `cpu`** を自動選択します。
+- 既定（`"compute_type": "auto"`）では **`cuda` 時は `int8_float16`、`cpu` 時は `int8`** を自動選択します。
+- 起動時に次のようなログが出ます：
+  ```text
+  [fwhisper] model=large-v3 device=cuda compute_type=int8_float16
+  ```
+  `device=cuda` なら **GPU 使用中**、`device=cpu` なら **CPU 使用中** です。
+
+### 手動で固定したい場合
+- `config.json` で指定：
+  ```json
+  "device": "cuda",       // または "cpu"
+  "compute_type": "int8_float16"
+  ```
+- 一時的に環境変数で：
+  - PowerShell:
+    ```powershell
+    $env:FWHISPER_DEVICE="cuda"
+    $env:FWHISPER_COMPUTE="int8_float16"
+    uv run fwhisper-batch
+    ```
+
+### 動作確認ワンライナー
+```powershell
+uv run python -c "import ctranslate2 as c; print('CUDA GPUs:', c.get_cuda_device_count())"
+```
+`CUDA GPUs: 1` 以上なら GPU を掴めます（NVIDIA CUDA GPU 対応）。
+
+---
+
 ## 🧰 CLI オプション
 ```bash
-uv run fwhisper-batch --config config.json [--word-timestamps]
+uv run fwhisper-batch --config config.json [--word-timestamps] [--no-progress]
 uv run fwhisper-batch --root ./data --out ./out --files a.wav b.mp3
 ```
 - `--config`: 設定ファイルのパス（既定: `config.json`）
@@ -91,6 +122,7 @@ uv run fwhisper-batch --root ./data --out ./out --files a.wav b.mp3
 - `--out`: `output_dir` を上書き
 - `--files`: `audio_files` を上書き（空白区切り）
 - `--word-timestamps`: 単語タイムスタンプを `segments.jsonl` に含める
+- `--no-progress`: ファイル内進捗バーを非表示
 
 ---
 
@@ -101,17 +133,6 @@ uv run fwhisper-batch --root ./data --out ./out --files a.wav b.mp3
 - `<basename>_segments.jsonl` … 区間ごとの `{start,end,text,words?}`（1行1JSON）
 
 > SRT/WebVTT への変換は簡単に拡張可能です（必要ならスニペット提供します）。
-
----
-
-## ⚡ GPU / 性能の目安
-- **GPU**: ある場合は自動検出（CTranslate2）。強制するには
-  - `config.json` で `"device": "cuda"` または
-  - 環境変数 `FWHISPER_DEVICE=cuda`
-- **量子化**: 速度/メモリ節約に効果的
-  - GPU: `"compute_type": "int8_float16"`
-  - CPU: `"compute_type": "int8"`
-- **スループット**: 長音声・多数ファイルは `use_vad=true`、`min_silence_ms` を調整
 
 ---
 
@@ -178,3 +199,43 @@ fwhisper-uv/
 
 ## ❓サポート
 設定や pyannote 連携（話者分離→話者ラベル付き文字起こし）、SRT/WebVTT 出力を追加したい場合は声をかけてください。
+
+
+---
+
+## 🧩 GPU / CUDA のセットアップは必要？
+
+**結論：必須ではありません。**  
+Faster-Whisper は CTranslate2 の **GPU 対応ホイール（pip）** を利用しており、**CUDA Toolkit や cuDNN を別途インストールしなくても動作**します。  
+必要なのは **対応する NVIDIA GPU＋適切なドライバ** だけです（インストール済みのドライバが最近のものであればOK）。
+
+> 例外：既に CUDA Toolkit を導入済みでも問題ありません（共存可）。また、PyTorch を別用途（例：pyannote）で使う場合は、そちらの推奨に従って CUDA/cuDNN を用意してください。
+
+### GPU 利用可否の確認
+```powershell
+uv run python -c "import ctranslate2 as c; print('CUDA GPUs:', c.get_cuda_device_count())"
+```
+`CUDA GPUs: 1` 以上が表示されれば、`device=auto` で **GPU (cuda)** が選ばれます。
+
+> NOTE: CTranslate2 の pip ホイールは必要な CUDA/cuDNN ランタイムを同梱しています。OS 側に CUDA Toolkit を入れていなくても動作します。
+
+---
+
+## ✅ 推奨環境（2025年時点・動作確認例）
+
+> 下表は実機での **動作確認済み例** です。Faster-Whisper 単体では PyTorch は不要ですが、**pyannote 等の連携用途**や他の研究環境と合わせる場合の参考構成として記載します。
+
+| 項目           | 推奨/確認済み環境                                   |
+| -------------- | --------------------------------------------------- |
+| GPU            | NVIDIA GeForce **RTX 30XX 以上**                    |
+| NVIDIA Driver  | 最新版推奨（CUDA 11.8 対応相当以上）                 |
+| CUDA Toolkit   | **任意**（未導入でも可／導入するなら **11.8** 推奨） |
+| cuDNN          | **任意**（pip ホイール同梱。導入するなら **9.x**）   |
+| PyTorch        | **任意**（連携用途例：**2.3.0 (cu118)**）           |
+| Python         | **3.12**                                            |
+| OS             | **Windows 10 / 11**、または **WSL2 (Ubuntu)**       |
+
+> 補足：上記は「GPU 利用の安定運用」を意識した構成です。CPU だけで使う場合は GPU 関連の準備は不要です。
+
+---
+

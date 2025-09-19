@@ -1,11 +1,16 @@
-# venv / uv
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual env / uv
 .venv/
 uv.lock
 
-# OS
-.DS_Store
+# Build artifacts
+build/
+dist/
+*.egg-info/
 
 # Outputs
 outputs/
-
-/config.json
