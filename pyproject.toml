@@ -1,0 +1,21 @@
+[project]
+name = "fwhisper-batch"
+version = "0.1.0"
+description = "Batch transcription with Faster-Whisper using uv"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "faster-whisper>=1.0.1",
+  "tqdm>=4.66.0",
+  "webrtcvad>=2.0.10",
+]
+
+[project.scripts]
+fwhisper-batch = "fwhisper_batch.transcribe_batch:main"
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+# ← ここをマップ形式に
+fwhisper_batch = { path = "src/fwhisper_batch" }

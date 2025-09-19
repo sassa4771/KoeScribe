@@ -1,0 +1,2 @@
+[console_scripts]
+fwhisper-batch = fwhisper_batch.transcribe_batch:main

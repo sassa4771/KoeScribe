@@ -1,43 +1,16 @@
-# Python環境関連
-venv/
-.env
+# Python bytecode
 __pycache__/
-*.pyc
-.ipynb_checkpoints
+*.py[cod]
+*$py.class
 
-# Whisperモデルファイル（容量が大きいため除外）
-models/
-*.pt
-*.pth
+# Virtual env / uv
+.venv/
+uv.lock
 
-# データフォルダ（動画・音声ファイル除外）
-data/
-audio/
-video/
-media/
-*.mp3
-*.mp4
-*.wav
-*.flac
-*.aac
-*.mov
-*.avi
-*.mkv
+# Build artifacts
+build/
+dist/
+*.egg-info/
 
-# 出力データフォルダ
-output/
-
-# ログファイル
-*.log
-
-# IDE・エディタ関連
-.vscode/
-.idea/
-
-# 環境設定・シークレット情報
-.env*
-*.ini
-*.cfg
-
-/result
-secrets.json
+# Outputs
+outputs/
