@@ -19,7 +19,9 @@ def detect_device() -> str:
 
 
 def resolve_device(device_cfg: str) -> str:
-    if device_cfg and device_cfg.lower() in {"cuda", "cpu"}:
+    if device_cfg and device_cfg.lower() in {"cuda", "cpu", "auto"}:
+        if device_cfg.lower() == "auto":
+            return detect_device()
         return device_cfg.lower()
     env = os.getenv("FWHISPER_DEVICE", "").lower()
     if env in {"cuda", "cpu"}:
@@ -42,6 +44,7 @@ def load_config(path: Path) -> Dict[str, Any]:
 
 
 def write_jsonl(path: Path, rows: List[Dict[str, Any]]):
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -58,6 +61,13 @@ def transcribe_one(
     word_timestamps: bool,
     show_progress: bool = True,
 ) -> Dict[str, Any]:
+    """
+    1ファイルを文字起こしして出力一式を保存する。
+    - TXT: <stem>_transcription.txt
+    - JSONL: <stem>_segments.jsonl
+    - JSONL: <stem>_words.jsonl（word_timestamps=True の時だけ）
+    - TXT: <stem>_processing_time.txt
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     start = time.time()
@@ -66,12 +76,13 @@ def transcribe_one(
         language=language if language else None,
         beam_size=beam_size,
         vad_filter=use_vad,
-        vad_parameters={"min_silence_duration_ms": min_silence_ms},
+        vad_parameters={"min_silence_duration_ms": min_silence_ms} if use_vad else None,
         word_timestamps=word_timestamps,
     )
 
-    # ✅ セグメント逐次処理＋進捗バー
-    rows: List[Dict[str, Any]] = []
+    # 逐次処理＋進捗
+    rows_segments: List[Dict[str, Any]] = []
+    rows_words: List[Dict[str, Any]] = []
     text_parts: List[str] = []
     dur = float(getattr(info, "duration", 0.0) or 0.0)
     last_end = 0.0
@@ -87,12 +98,16 @@ def transcribe_one(
         )
 
     for s in segments:
-        row: Dict[str, Any] = {"start": s.start, "end": s.end, "text": s.text}
-        if word_timestamps and getattr(s, "words", None):
-            row["words"] = [{"start": w.start, "end": w.end, "word": w.word} for w in s.words]
-        rows.append(row)
+        # セグメント保存
+        seg_obj: Dict[str, Any] = {"start": s.start, "end": s.end, "text": s.text}
         text_parts.append(s.text)
+        # 単語があれば words 側に格納（セグメントにも入れないで軽量化）
+        if word_timestamps and getattr(s, "words", None):
+            for w in s.words:
+                rows_words.append({"start": w.start, "end": w.end, "word": w.word})
+        rows_segments.append(seg_obj)
 
+        # 進捗更新
         if pbar is not None:
             inc = max(0.0, float(s.end) - last_end)
             if inc > 0:
@@ -108,19 +123,25 @@ def transcribe_one(
 
     # 保存
     (out_dir / f"{audio_path.stem}_transcription.txt").write_text(text, encoding="utf-8")
+    write_jsonl(out_dir / f"{audio_path.stem}_segments.jsonl", rows_segments)
+    if word_timestamps and rows_words:
+        write_jsonl(out_dir / f"{audio_path.stem}_words.jsonl", rows_words)
+
     stats = [
         f"処理時間: {proc_time:.2f} 秒",
-        f"推定言語: {info.language}",
-        f"音声長: {info.duration:.2f} 秒",
+        f"推定言語: {getattr(info, 'language', '')}",
+        f"音声長: {getattr(info, 'duration', 0.0):.2f} 秒",
+        f"単語タイムスタンプ: {'あり' if (word_timestamps and rows_words) else 'なし'}",
+        f"VAD: {'ON' if use_vad else 'OFF'} (min_silence_ms={min_silence_ms if use_vad else 'N/A'})",
     ]
     (out_dir / f"{audio_path.stem}_processing_time.txt").write_text("\n".join(stats) + "\n", encoding="utf-8")
-    write_jsonl(out_dir / f"{audio_path.stem}_segments.jsonl", rows)
 
     return {
         "text": text,
         "processing_time": proc_time,
-        "language": info.language,
-        "duration": info.duration,
+        "language": getattr(info, "language", None),
+        "duration": getattr(info, "duration", None),
+        "words_count": len(rows_words),
     }
 
 
@@ -130,7 +151,7 @@ def main():
     parser.add_argument("--root", type=str, help="Override root_dir")
     parser.add_argument("--out", type=str, help="Override output_dir")
     parser.add_argument("--files", nargs="*", help="Override audio files list")
-    parser.add_argument("--word-timestamps", action="store_true", help="Include per-word timestamps in JSONL")
+    parser.add_argument("--word-timestamps", action="store_true", help="Export per-word timestamps (also writes *_words.jsonl)")
     parser.add_argument("--no-progress", action="store_true", help="Disable per-file progress bar")
     args = parser.parse_args()
 
@@ -174,7 +195,8 @@ def main():
         preview = result["text"][:500]
         print(f"\n=== {idx}/{len(inputs)} Done: {p.name} ===")
         print(preview + ("..." if len(result["text"]) > len(preview) else ""))
-
+        if args.word_timestamps:
+            print(f"words.jsonl: {result['words_count']} words")
 
 if __name__ == "__main__":
     main()
