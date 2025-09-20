@@ -128,7 +128,7 @@ def test_transcription_integration():
     try:
         from fwhisper_batch.transcribe_batch import (
             detect_device, resolve_device, resolve_compute_type,
-            load_config, is_diarization_enabled
+            load_config, is_diarization_enabled, transcribe_one_with_callback
         )
         
         device = detect_device()
@@ -139,6 +139,12 @@ def test_transcription_integration():
         print(f"   Detected device: {device}")
         print(f"   Resolved device: {resolved_device}")
         print(f"   Compute type: {compute_type}")
+        
+        if callable(transcribe_one_with_callback):
+            print("✅ transcribe_one_with_callback function available")
+        else:
+            print("❌ transcribe_one_with_callback function not found")
+            return False
         
         config_path = Path("config.json")
         if config_path.exists():
@@ -157,6 +163,37 @@ def test_transcription_integration():
         traceback.print_exc()
         return False
 
+def test_phase_progress_signals():
+    """Test that phase progress signals are properly defined"""
+    print("\nTesting phase progress signals...")
+    
+    try:
+        from fwhisper_batch.gui_app import TranscriptionWorker
+        
+        worker = TranscriptionWorker()
+        
+        if hasattr(worker, 'phase_progress_updated'):
+            print("✅ phase_progress_updated signal exists")
+        else:
+            print("❌ phase_progress_updated signal not found")
+            return False
+            
+        signal = worker.phase_progress_updated
+        if signal:
+            print("✅ phase_progress_updated signal is properly defined")
+        else:
+            print("❌ phase_progress_updated signal is not properly defined")
+            return False
+        
+        print("✅ Phase progress signals test passed")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Phase progress signals test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 if __name__ == "__main__":
     print("🧪 Testing GUI v2 application features...\n")
     
@@ -166,6 +203,7 @@ if __name__ == "__main__":
     results.append(test_results_database())
     results.append(test_help_tooltips())
     results.append(test_transcription_integration())
+    results.append(test_phase_progress_signals())
     
     print(f"\n📊 Test Results: {sum(results)}/{len(results)} passed")
     

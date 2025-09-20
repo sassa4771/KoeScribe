@@ -25,8 +25,8 @@ from dotenv import load_dotenv
 from faster_whisper import WhisperModel
 
 from .transcribe_batch import (
-    transcribe_one, load_config, resolve_device, resolve_compute_type,
-    detect_device, is_diarization_enabled
+    transcribe_one, transcribe_one_with_callback, load_config, resolve_device, resolve_compute_type,
+    detect_device, is_diarization_enabled, diarize_and_merge
 )
 
 
@@ -135,6 +135,7 @@ class ResultsDatabase:
 
 class TranscriptionWorker(QThread):
     progress_updated = Signal(str, float, str)
+    phase_progress_updated = Signal(str, int, float, str)  # file_path, phase_index, progress, phase_name
     job_completed = Signal(str, dict)
     job_failed = Signal(str, str)
     queue_updated = Signal(int)
@@ -172,6 +173,7 @@ class TranscriptionWorker(QThread):
     def process_job(self, job: ProcessingJob):
         try:
             self.progress_updated.emit(str(job.file_path), 0.0, "モデル読み込み中...")
+            self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "モデル読み込み中")
             
             if self.model is None:
                 device = resolve_device(job.settings_preset.device)
@@ -182,28 +184,35 @@ class TranscriptionWorker(QThread):
                     compute_type=compute_type
                 )
             
-            self.progress_updated.emit(str(job.file_path), 20.0, "音声解析中...")
-            
             output_dir = Path(job.settings_preset.output_dir) / f"output_{job.file_path.stem}"
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            result = transcribe_one(
-                self.model,
-                job.file_path,
-                output_dir,
-                job.settings_preset.language,
-                job.settings_preset.beam_size,
-                job.settings_preset.use_vad,
-                job.settings_preset.min_silence_ms,
-                word_timestamps=True,
-                show_progress=False,
-                enable_diarization=job.settings_preset.enable_diarization,
-                diarization_config=asdict(job.settings_preset) if job.settings_preset.enable_diarization else None
+            self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "文字起こし開始")
+            
+            def transcription_progress_callback(progress: float):
+                self.phase_progress_updated.emit(str(job.file_path), 0, progress, "文字起こし中")
+            
+            result = self._transcribe_with_progress(
+                job, output_dir, transcription_progress_callback
             )
             
-            self.progress_updated.emit(str(job.file_path), 90.0, "CSV変換中...")
+            self.phase_progress_updated.emit(str(job.file_path), 0, 100.0, "文字起こし完了")
             
+            if job.settings_preset.enable_diarization:
+                self.phase_progress_updated.emit(str(job.file_path), 1, 0.0, "話者分離開始")
+                
+                diarization_result = self._perform_diarization(job, output_dir, result)
+                if diarization_result:
+                    result["diarization"] = diarization_result
+                    self.phase_progress_updated.emit(str(job.file_path), 1, 100.0, "話者分離完了")
+                else:
+                    self.phase_progress_updated.emit(str(job.file_path), 1, 100.0, "話者分離スキップ")
+            else:
+                self.phase_progress_updated.emit(str(job.file_path), 1, 100.0, "話者分離無効")
+            
+            self.phase_progress_updated.emit(str(job.file_path), 2, 0.0, "CSV変換開始")
             self._convert_to_csv(output_dir, job.file_path.stem, result)
+            self.phase_progress_updated.emit(str(job.file_path), 2, 100.0, "CSV変換完了")
             
             job.result = result
             
@@ -223,6 +232,52 @@ class TranscriptionWorker(QThread):
             job.job_id = self.results_db.save_result(job)
             self.job_failed.emit(str(job.file_path), str(e))
             
+    def _transcribe_with_progress(self, job: ProcessingJob, output_dir: Path, progress_callback):
+        """Perform transcription with progress callback"""
+        return transcribe_one_with_callback(
+            self.model,
+            job.file_path,
+            output_dir,
+            job.settings_preset.language,
+            job.settings_preset.beam_size,
+            job.settings_preset.use_vad,
+            job.settings_preset.min_silence_ms,
+            word_timestamps=True,
+            show_progress=False,
+            progress_callback=progress_callback
+        )
+    
+    def _perform_diarization(self, job: ProcessingJob, output_dir: Path, transcription_result: Dict[str, Any]):
+        """Perform speaker diarization"""
+        if not job.settings_preset.enable_diarization:
+            return None
+            
+        try:
+            words_file = output_dir / f"{job.file_path.stem}_words.jsonl"
+            segments_file = output_dir / f"{job.file_path.stem}_segments.jsonl"
+            
+            if not words_file.exists() or not segments_file.exists():
+                return None
+                
+            words = []
+            with open(words_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        words.append(json.loads(line))
+            
+            segments = []
+            with open(segments_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        segments.append(json.loads(line))
+            
+            config = asdict(job.settings_preset)
+            return diarize_and_merge(job.file_path, output_dir, config, words, segments)
+            
+        except Exception as e:
+            print(f"[warning] Diarization failed: {e}")
+            return None
+    
     def _convert_to_csv(self, output_dir: Path, stem: str, result: Dict[str, Any]):
         segments_file = output_dir / f"{stem}_segments_with_speakers.jsonl"
         if segments_file.exists():
@@ -449,12 +504,43 @@ class MainWindow(QMainWindow):
         progress_layout = QVBoxLayout(progress_group)
         
         self.current_file_label = QLabel("待機中")
+        progress_layout.addWidget(self.current_file_label)
+        
+        phase1_layout = QHBoxLayout()
+        self.phase1_label = QLabel("1. 文字起こし:")
+        self.phase1_progress = QProgressBar()
+        self.phase1_status = QLabel("待機中")
+        phase1_layout.addWidget(self.phase1_label)
+        phase1_layout.addWidget(self.phase1_progress)
+        phase1_layout.addWidget(self.phase1_status)
+        progress_layout.addLayout(phase1_layout)
+        
+        phase2_layout = QHBoxLayout()
+        self.phase2_label = QLabel("2. 話者分離:")
+        self.phase2_progress = QProgressBar()
+        self.phase2_status = QLabel("待機中")
+        phase2_layout.addWidget(self.phase2_label)
+        phase2_layout.addWidget(self.phase2_progress)
+        phase2_layout.addWidget(self.phase2_status)
+        progress_layout.addLayout(phase2_layout)
+        
+        phase3_layout = QHBoxLayout()
+        self.phase3_label = QLabel("3. マージ・CSV変換:")
+        self.phase3_progress = QProgressBar()
+        self.phase3_status = QLabel("待機中")
+        phase3_layout.addWidget(self.phase3_label)
+        phase3_layout.addWidget(self.phase3_progress)
+        phase3_layout.addWidget(self.phase3_status)
+        progress_layout.addLayout(phase3_layout)
+        
+        overall_layout = QHBoxLayout()
+        overall_layout.addWidget(QLabel("全体進捗:"))
         self.progress_bar = QProgressBar()
+        overall_layout.addWidget(self.progress_bar)
+        progress_layout.addLayout(overall_layout)
+        
         self.stage_label = QLabel("")
         self.queue_label = QLabel("キュー: 0件")
-        
-        progress_layout.addWidget(self.current_file_label)
-        progress_layout.addWidget(self.progress_bar)
         progress_layout.addWidget(self.stage_label)
         progress_layout.addWidget(self.queue_label)
         
@@ -548,6 +634,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.clicked.connect(self.stop_processing)
         
         self.worker.progress_updated.connect(self.update_progress)
+        self.worker.phase_progress_updated.connect(self.update_phase_progress)
         self.worker.job_completed.connect(self.job_completed)
         self.worker.job_failed.connect(self.job_failed)
         self.worker.queue_updated.connect(self.update_queue_count)
@@ -683,6 +770,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "処理するファイルを選択してください。")
             return
             
+        self.reset_phase_progress()
+        
         preset = self.get_current_preset()
         self.jobs.clear()
         
@@ -719,8 +808,45 @@ class MainWindow(QMainWindow):
                 self.results_table.setItem(i, 1, QTableWidgetItem(f"{stage} ({progress:.1f}%)"))
                 break
                 
+    def update_phase_progress(self, file_path: str, phase_index: int, progress: float, phase_name: str):
+        """Update progress for a specific phase"""
+        phase_bars = [self.phase1_progress, self.phase2_progress, self.phase3_progress]
+        phase_labels = [self.phase1_status, self.phase2_status, self.phase3_status]
+        
+        for i, (bar, label) in enumerate(zip(phase_bars, phase_labels)):
+            if i < phase_index:
+                bar.setValue(100)
+                label.setText("完了")
+            elif i == phase_index:
+                bar.setValue(int(progress))
+                label.setText(f"{phase_name} ({progress:.1f}%)")
+            else:
+                bar.setValue(0)
+                label.setText("待機中")
+        
+        overall_progress = (phase_index * 100 + progress) / 3
+        self.progress_bar.setValue(int(overall_progress))
+        
+        file_name = Path(file_path).name
+        for i in range(self.results_table.rowCount()):
+            if self.results_table.item(i, 0).text() == file_name:
+                self.results_table.setItem(i, 1, QTableWidgetItem(f"{phase_name} ({progress:.1f}%)"))
+                break
+                
     def update_queue_count(self, count: int):
         self.queue_label.setText(f"キュー: {count}件")
+        
+    def reset_phase_progress(self):
+        """Reset all phase progress bars to initial state"""
+        phase_bars = [self.phase1_progress, self.phase2_progress, self.phase3_progress]
+        phase_labels = [self.phase1_status, self.phase2_status, self.phase3_status]
+        
+        for bar, label in zip(phase_bars, phase_labels):
+            bar.setValue(0)
+            label.setText("待機中")
+        
+        self.progress_bar.setValue(0)
+        self.stage_label.setText("")
         
     def job_completed(self, file_path: str, result: Dict[str, Any]):
         file_name = Path(file_path).name
