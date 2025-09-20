@@ -206,10 +206,15 @@ class TranscriptionWorker(QThread):
             self._convert_to_csv(output_dir, job.file_path.stem, result)
             
             job.result = result
-            job.status = "完了"
-            job.job_id = self.results_db.save_result(job)
             
-            self.progress_updated.emit(str(job.file_path), 100.0, "完了")
+            if job.settings_preset.enable_diarization and not result.get('diarization'):
+                job.status = "完了 (話者分離スキップ)"
+                self.progress_updated.emit(str(job.file_path), 100.0, "完了 (話者分離スキップ)")
+            else:
+                job.status = "完了"
+                self.progress_updated.emit(str(job.file_path), 100.0, "完了")
+                
+            job.job_id = self.results_db.save_result(job)
             self.job_completed.emit(str(job.file_path), result)
             
         except Exception as e:
@@ -722,7 +727,21 @@ class MainWindow(QMainWindow):
         
         for i in range(self.results_table.rowCount()):
             if self.results_table.item(i, 0).text() == file_name:
-                self.results_table.setItem(i, 1, QTableWidgetItem("完了"))
+                current_status = self.stage_label.text()
+                if "話者分離スキップ" in current_status:
+                    self.results_table.setItem(i, 1, QTableWidgetItem("完了 (話者分離スキップ)"))
+                    if not hasattr(self, '_diarization_warning_shown'):
+                        self._diarization_warning_shown = True
+                        QMessageBox.information(
+                            self, "話者分離について", 
+                            "話者分離機能を使用するには、.envファイルにHUGGINGFACE_TOKENを設定してください。\n\n"
+                            "設定方法:\n"
+                            "1. プロジェクトルートに.envファイルを作成\n"
+                            "2. HUGGINGFACE_TOKEN=hf_your_token_here を追加\n"
+                            "3. Hugging Face (https://huggingface.co) でトークンを取得"
+                        )
+                else:
+                    self.results_table.setItem(i, 1, QTableWidgetItem("完了"))
                 self.results_table.setItem(i, 2, QTableWidgetItem(f"{result.get('processing_time', 0):.2f}秒"))
                 
                 output_dir = Path(self.get_current_preset().output_dir) / f"output_{Path(file_path).stem}"
