@@ -299,87 +299,116 @@ class MainWindow(QMainWindow):
         left_panel.setMaximumWidth(400)
         left_layout = QVBoxLayout(left_panel)
         
-        preset_group = QGroupBox("設定プリセット")
-        preset_layout = QVBoxLayout(preset_group)
+        settings_group = QGroupBox("設定")
+        settings_layout = QVBoxLayout(settings_group)
         
         preset_row = QHBoxLayout()
         self.preset_combo = QComboBox()
         self.preset_combo.setEditable(True)
         preset_row.addWidget(QLabel("プリセット:"))
         preset_row.addWidget(self.preset_combo)
-        preset_layout.addLayout(preset_row)
+        settings_layout.addLayout(preset_row)
         
-        preset_buttons = QHBoxLayout()
-        self.save_preset_btn = QPushButton("保存")
+        load_button_row = QHBoxLayout()
         self.load_preset_btn = QPushButton("読み込み")
-        self.delete_preset_btn = QPushButton("削除")
-        preset_buttons.addWidget(self.save_preset_btn)
-        preset_buttons.addWidget(self.load_preset_btn)
-        preset_buttons.addWidget(self.delete_preset_btn)
-        preset_layout.addLayout(preset_buttons)
+        load_button_row.addWidget(self.load_preset_btn)
+        load_button_row.addStretch()
+        settings_layout.addLayout(load_button_row)
         
-        left_layout.addWidget(preset_group)
-        
-        settings_group = QGroupBox("設定")
-        settings_layout = QFormLayout(settings_group)
+        model_row = QHBoxLayout()
         
         self.model_combo = QComboBox()
         self.model_combo.addItems(["tiny", "base", "small", "medium", "large-v3"])
         self.model_combo.setCurrentText("large-v3")
-        self.add_help_widget(settings_layout, "モデルサイズ:", self.model_combo, "model_size")
+        model_row.addWidget(QLabel("モデルサイズ:"))
+        model_row.addWidget(self.model_combo)
+        model_row.addWidget(self.create_help_button("model_size"))
+        settings_layout.addLayout(model_row)
         
+        lang_row = QHBoxLayout()
         self.language_combo = QComboBox()
         self.language_combo.addItems(["ja", "en", "auto"])
         self.language_combo.setCurrentText("ja")
-        self.add_help_widget(settings_layout, "言語:", self.language_combo, "language")
+        lang_row.addWidget(QLabel("言語:"))
+        lang_row.addWidget(self.language_combo)
+        settings_layout.addLayout(lang_row)
         
+        device_row = QHBoxLayout()
         self.device_combo = QComboBox()
         self.device_combo.addItems(["auto", "cuda", "cpu"])
         self.device_combo.setCurrentText("auto")
-        self.add_help_widget(settings_layout, "デバイス:", self.device_combo, "device")
+        device_row.addWidget(QLabel("デバイス:"))
+        device_row.addWidget(self.device_combo)
+        settings_layout.addLayout(device_row)
         
+        compute_row = QHBoxLayout()
         self.compute_combo = QComboBox()
         self.compute_combo.addItems(["auto", "float16", "int8_float16", "int8"])
         self.compute_combo.setCurrentText("auto")
-        self.add_help_widget(settings_layout, "計算精度:", self.compute_combo, "compute_type")
+        compute_row.addWidget(QLabel("計算精度:"))
+        compute_row.addWidget(self.compute_combo)
+        compute_row.addWidget(self.create_help_button("compute_type"))
+        settings_layout.addLayout(compute_row)
         
+        beam_row = QHBoxLayout()
         self.beam_size_spin = QSpinBox()
         self.beam_size_spin.setRange(1, 20)
         self.beam_size_spin.setValue(5)
-        self.add_help_widget(settings_layout, "ビームサイズ:", self.beam_size_spin, "beam_size")
+        beam_row.addWidget(QLabel("ビームサイズ:"))
+        beam_row.addWidget(self.beam_size_spin)
+        beam_row.addWidget(self.create_help_button("beam_size"))
+        settings_layout.addLayout(beam_row)
         
-        self.vad_check = QCheckBox()
+        vad_row = QHBoxLayout()
+        self.vad_check = QCheckBox("VAD使用")
         self.vad_check.setChecked(True)
-        self.add_help_widget(settings_layout, "VAD使用:", self.vad_check, "use_vad")
+        vad_row.addWidget(self.vad_check)
+        settings_layout.addLayout(vad_row)
         
+        silence_row = QHBoxLayout()
         self.min_silence_spin = QSpinBox()
         self.min_silence_spin.setRange(100, 2000)
         self.min_silence_spin.setValue(500)
         self.min_silence_spin.setSuffix(" ms")
-        self.add_help_widget(settings_layout, "最小無音時間:", self.min_silence_spin, "min_silence_ms")
+        silence_row.addWidget(QLabel("最小無音時間:"))
+        silence_row.addWidget(self.min_silence_spin)
+        silence_row.addWidget(self.create_help_button("min_silence_ms"))
+        settings_layout.addLayout(silence_row)
         
-        self.diarization_check = QCheckBox()
+        diarize_row = QHBoxLayout()
+        self.diarization_check = QCheckBox("話者分離")
         self.diarization_check.setChecked(True)
-        settings_layout.addRow("話者分離:", self.diarization_check)
+        diarize_row.addWidget(self.diarization_check)
+        settings_layout.addLayout(diarize_row)
         
+        speakers_row = QHBoxLayout()
         self.max_speakers_spin = QSpinBox()
         self.max_speakers_spin.setRange(1, 20)
         self.max_speakers_spin.setValue(2)
-        self.add_help_widget(settings_layout, "最大話者数:", self.max_speakers_spin, "max_speakers")
+        speakers_row.addWidget(QLabel("最大話者数:"))
+        speakers_row.addWidget(self.max_speakers_spin)
+        speakers_row.addWidget(self.create_help_button("max_speakers"))
+        settings_layout.addLayout(speakers_row)
         
         left_layout.addWidget(settings_group)
-        
-        output_group = QGroupBox("出力設定")
-        output_layout = QVBoxLayout(output_group)
         
         output_dir_layout = QHBoxLayout()
         self.output_dir_edit = QLineEdit("./outputs")
         self.output_dir_btn = QPushButton("参照")
+        output_dir_layout.addWidget(QLabel("出力設定:"))
         output_dir_layout.addWidget(self.output_dir_edit)
         output_dir_layout.addWidget(self.output_dir_btn)
-        output_layout.addLayout(output_dir_layout)
+        settings_layout.addLayout(output_dir_layout)
         
-        left_layout.addWidget(output_group)
+        save_delete_row = QHBoxLayout()
+        self.save_preset_btn = QPushButton("保存")
+        self.delete_preset_btn = QPushButton("削除")
+        save_delete_row.addWidget(self.save_preset_btn)
+        save_delete_row.addWidget(self.delete_preset_btn)
+        save_delete_row.addStretch()
+        settings_layout.addLayout(save_delete_row)
+        
+        left_layout.addWidget(settings_group)
         
         main_layout.addWidget(left_panel)
         
@@ -473,22 +502,15 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(right_panel)
         
-    def add_help_widget(self, layout, label_text, widget, help_key):
-        container = QWidget()
-        container_layout = QHBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        
-        container_layout.addWidget(widget)
-        
+    def create_help_button(self, help_key):
+        """Create a help button for settings"""
         help_btn = QPushButton("?")
         help_btn.setFixedSize(20, 20)
         help_btn.setToolTip(HELP_TOOLTIPS.get(help_key, ""))
         help_btn.clicked.connect(lambda: QMessageBox.information(
             self, "ヘルプ", HELP_TOOLTIPS.get(help_key, "情報がありません")
         ))
-        container_layout.addWidget(help_btn)
-        
-        layout.addRow(label_text, container)
+        return help_btn
         
     def setup_connections(self):
         self.save_preset_btn.clicked.connect(self.save_preset)
