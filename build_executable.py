@@ -15,7 +15,7 @@ def install_pyinstaller():
         print("✅ PyInstaller already installed")
     except ImportError:
         print("📦 Installing PyInstaller...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller"], check=True)
+        subprocess.run(["uv", "add", "pyinstaller"], check=True)
 
 def build_executable():
     """Build the executable using PyInstaller"""
