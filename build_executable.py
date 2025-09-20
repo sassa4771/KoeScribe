@@ -30,11 +30,15 @@ def build_executable():
         "--onefile",                    # Single executable file
         "--windowed",                   # No console window (GUI app)
         "--name=FWhisper-GUI",          # Executable name
+        "--paths=src",                  # Add src to Python path
         "--hidden-import=PySide6",
         "--hidden-import=faster_whisper",
         "--hidden-import=pyannote.audio",
         "--hidden-import=soundfile",
         "--hidden-import=webrtcvad",
+        "--hidden-import=fwhisper_batch",
+        "--hidden-import=fwhisper_batch.transcribe_batch",
+        "--hidden-import=fwhisper_batch.gui_app",
         "--collect-all=PySide6",
         "--collect-all=faster_whisper",
         "src/fwhisper_batch/gui_app.py"
@@ -83,7 +87,7 @@ block_cipher = None
 
 a = Analysis(
     ['src/fwhisper_batch/gui_app.py'],
-    pathex=[],
+    pathex=['src'],
     binaries=[],
     datas=[
         ('config.json', '.'),
@@ -98,6 +102,9 @@ a = Analysis(
         'numpy',
         'pandas',
         'sqlite3',
+        'fwhisper_batch',
+        'fwhisper_batch.transcribe_batch',
+        'fwhisper_batch.gui_app',
     ],
     hookspath=[],
     hooksconfig={},

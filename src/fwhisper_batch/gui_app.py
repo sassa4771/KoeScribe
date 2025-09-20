@@ -24,7 +24,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from faster_whisper import WhisperModel
 
-from .transcribe_batch import (
+from fwhisper_batch.transcribe_batch import (
     transcribe_one, transcribe_one_with_callback, load_config, resolve_device, resolve_compute_type,
     detect_device, is_diarization_enabled, diarize_and_merge
 )
