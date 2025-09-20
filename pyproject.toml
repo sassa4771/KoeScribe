@@ -12,10 +12,13 @@ dependencies = [
   "soundfile>=0.12.1",      # diarize/mergeで使用
   "numpy>=1.26",            # diarize/mergeで使用
   "pyannote.audio>=3.0.1",  # diarize用（Torchは各自のCUDAに合わせて別途）
+  "PySide6>=6.5.0",         # GUI framework
+  "pandas>=2.0.0",          # CSV export
 ]
 
 [project.scripts]
 fwhisper-batch = "fwhisper_batch.transcribe_batch:main"
+fwhisper-gui = "fwhisper_batch.gui_app:main"
 diarize-pyannote = "tools.diarize:main"
 merge-speakers   = "tools.merge_speakers:main"
 asr-diarize-merge = "tools.pipeline_all:main"
