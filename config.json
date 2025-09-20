@@ -1,14 +1,17 @@
 {
-  "root_dir": "C:\\Users\\sasat\\Downloads",
-  "audio_files": [
-    "尾関先生打ち合わせ_2025.09.17.m4a"
-  ],
+  "root_dir": "./samples",
+  "audio_files": ["Sample.m4a"],
   "output_dir": "./outputs",
+
   "model_size": "large-v3",
   "device": "auto",
   "compute_type": "auto",
   "beam_size": 5,
   "use_vad": true,
   "min_silence_ms": 500,
-  "language": "ja"
+  "language": "ja",
+
+  "diarize_model": "pyannote/speaker-diarization",
+  "diarize_min_dur": 0.8,
+  "diarize_bridge_gap": 0.3
 }
