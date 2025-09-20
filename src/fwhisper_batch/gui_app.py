@@ -42,7 +42,7 @@ HELP_TOOLTIPS = {
 
 
 @dataclass
-class ProjectConfig:
+class SettingsPreset:
     name: str
     model_size: str = "large-v3"
     language: str = "ja"
@@ -62,7 +62,7 @@ class ProjectConfig:
 @dataclass
 class ProcessingJob:
     file_path: Path
-    project_config: ProjectConfig
+    settings_preset: SettingsPreset
     status: str = "待機中"
     progress: float = 0.0
     result: Optional[Dict[str, Any]] = None
@@ -103,13 +103,13 @@ class ResultsDatabase:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             str(job.file_path),
-            job.project_config.name,
+            job.settings_preset.name,
             datetime.now(),
             datetime.now(),
             job.status,
             job.result.get('processing_time', 0) if job.result else 0,
             job.result.get('diarization', {}).get('segments_with_speakers', 0) if job.result and job.result.get('diarization') else 0,
-            job.project_config.output_dir,
+            job.settings_preset.output_dir,
             job.error
         ))
         job_id = cursor.lastrowid
@@ -173,31 +173,31 @@ class TranscriptionWorker(QThread):
             self.progress_updated.emit(str(job.file_path), 0.0, "モデル読み込み中...")
             
             if self.model is None:
-                device = resolve_device(job.project_config.device)
-                compute_type = resolve_compute_type(device, job.project_config.compute_type)
+                device = resolve_device(job.settings_preset.device)
+                compute_type = resolve_compute_type(device, job.settings_preset.compute_type)
                 self.model = WhisperModel(
-                    job.project_config.model_size,
+                    job.settings_preset.model_size,
                     device=device,
                     compute_type=compute_type
                 )
             
             self.progress_updated.emit(str(job.file_path), 20.0, "音声解析中...")
             
-            output_dir = Path(job.project_config.output_dir) / f"output_{job.file_path.stem}"
+            output_dir = Path(job.settings_preset.output_dir) / f"output_{job.file_path.stem}"
             output_dir.mkdir(parents=True, exist_ok=True)
             
             result = transcribe_one(
                 self.model,
                 job.file_path,
                 output_dir,
-                job.project_config.language,
-                job.project_config.beam_size,
-                job.project_config.use_vad,
-                job.project_config.min_silence_ms,
+                job.settings_preset.language,
+                job.settings_preset.beam_size,
+                job.settings_preset.use_vad,
+                job.settings_preset.min_silence_ms,
                 word_timestamps=True,
                 show_progress=False,
-                enable_diarization=job.project_config.enable_diarization,
-                diarization_config=asdict(job.project_config) if job.project_config.enable_diarization else None
+                enable_diarization=job.settings_preset.enable_diarization,
+                diarization_config=asdict(job.settings_preset) if job.settings_preset.enable_diarization else None
             )
             
             self.progress_updated.emit(str(job.file_path), 90.0, "CSV変換中...")
@@ -245,46 +245,46 @@ class TranscriptionWorker(QThread):
                 df.to_csv(csv_file, index=False, encoding='utf-8-sig')
 
 
-class ProjectManager:
+class SettingsManager:
     def __init__(self):
         self.settings = QSettings("FWhisper", "BatchGUI")
-        self.projects_dir = Path.home() / ".fwhisper_projects"
-        self.projects_dir.mkdir(exist_ok=True)
+        self.presets_dir = Path.home() / ".fwhisper_presets"
+        self.presets_dir.mkdir(exist_ok=True)
         
-    def save_project(self, config: ProjectConfig):
-        project_file = self.projects_dir / f"{config.name}.json"
-        with open(project_file, 'w', encoding='utf-8') as f:
-            json.dump(asdict(config), f, indent=2, ensure_ascii=False)
+    def save_preset(self, preset: SettingsPreset):
+        preset_file = self.presets_dir / f"{preset.name}.json"
+        with open(preset_file, 'w', encoding='utf-8') as f:
+            json.dump(asdict(preset), f, indent=2, ensure_ascii=False)
             
-    def load_project(self, name: str) -> Optional[ProjectConfig]:
-        project_file = self.projects_dir / f"{name}.json"
-        if project_file.exists():
-            with open(project_file, 'r', encoding='utf-8') as f:
+    def load_preset(self, name: str) -> Optional[SettingsPreset]:
+        preset_file = self.presets_dir / f"{name}.json"
+        if preset_file.exists():
+            with open(preset_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return ProjectConfig(**data)
+                return SettingsPreset(**data)
         return None
         
-    def list_projects(self) -> List[str]:
-        return [f.stem for f in self.projects_dir.glob("*.json")]
+    def list_presets(self) -> List[str]:
+        return [f.stem for f in self.presets_dir.glob("*.json")]
         
-    def delete_project(self, name: str):
-        project_file = self.projects_dir / f"{name}.json"
-        if project_file.exists():
-            project_file.unlink()
+    def delete_preset(self, name: str):
+        preset_file = self.presets_dir / f"{name}.json"
+        if preset_file.exists():
+            preset_file.unlink()
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.project_manager = ProjectManager()
+        self.settings_manager = SettingsManager()
         self.worker = TranscriptionWorker()
-        self.current_config = ProjectConfig(name="デフォルト")
+        self.current_preset = SettingsPreset(name="デフォルト")
         self.jobs: List[ProcessingJob] = []
         self.results_db = ResultsDatabase()
         
         self.setup_ui()
         self.setup_connections()
-        self.load_last_project()
+        self.load_last_preset()
         
     def setup_ui(self):
         self.setWindowTitle("FWhisper Batch GUI v2 - 音声文字起こし & 話者分離")
@@ -299,26 +299,26 @@ class MainWindow(QMainWindow):
         left_panel.setMaximumWidth(400)
         left_layout = QVBoxLayout(left_panel)
         
-        project_group = QGroupBox("プロジェクト管理")
-        project_layout = QVBoxLayout(project_group)
+        preset_group = QGroupBox("設定プリセット")
+        preset_layout = QVBoxLayout(preset_group)
         
-        project_row = QHBoxLayout()
-        self.project_combo = QComboBox()
-        self.project_combo.setEditable(True)
-        project_row.addWidget(QLabel("プロジェクト:"))
-        project_row.addWidget(self.project_combo)
-        project_layout.addLayout(project_row)
+        preset_row = QHBoxLayout()
+        self.preset_combo = QComboBox()
+        self.preset_combo.setEditable(True)
+        preset_row.addWidget(QLabel("プリセット:"))
+        preset_row.addWidget(self.preset_combo)
+        preset_layout.addLayout(preset_row)
         
-        project_buttons = QHBoxLayout()
-        self.save_project_btn = QPushButton("保存")
-        self.load_project_btn = QPushButton("読み込み")
-        self.delete_project_btn = QPushButton("削除")
-        project_buttons.addWidget(self.save_project_btn)
-        project_buttons.addWidget(self.load_project_btn)
-        project_buttons.addWidget(self.delete_project_btn)
-        project_layout.addLayout(project_buttons)
+        preset_buttons = QHBoxLayout()
+        self.save_preset_btn = QPushButton("保存")
+        self.load_preset_btn = QPushButton("読み込み")
+        self.delete_preset_btn = QPushButton("削除")
+        preset_buttons.addWidget(self.save_preset_btn)
+        preset_buttons.addWidget(self.load_preset_btn)
+        preset_buttons.addWidget(self.delete_preset_btn)
+        preset_layout.addLayout(preset_buttons)
         
-        left_layout.addWidget(project_group)
+        left_layout.addWidget(preset_group)
         
         settings_group = QGroupBox("設定")
         settings_layout = QFormLayout(settings_group)
@@ -375,11 +375,9 @@ class MainWindow(QMainWindow):
         output_dir_layout = QHBoxLayout()
         self.output_dir_edit = QLineEdit("./outputs")
         self.output_dir_btn = QPushButton("参照")
-        self.open_output_btn = QPushButton("📁 出力フォルダを開く")
         output_dir_layout.addWidget(self.output_dir_edit)
         output_dir_layout.addWidget(self.output_dir_btn)
         output_layout.addLayout(output_dir_layout)
-        output_layout.addWidget(self.open_output_btn)
         
         left_layout.addWidget(output_group)
         
@@ -393,11 +391,11 @@ class MainWindow(QMainWindow):
         processing_tab = QWidget()
         processing_layout = QVBoxLayout(processing_tab)
         
-        file_group = QGroupBox("ファイル選択")
+        file_group = QGroupBox("ファイル選択 (WAVファイルのみ)")
         file_layout = QVBoxLayout(file_group)
         
         file_buttons = QHBoxLayout()
-        self.add_files_btn = QPushButton("ファイル追加")
+        self.add_files_btn = QPushButton("WAVファイル追加")
         self.add_folder_btn = QPushButton("フォルダ追加")
         self.clear_files_btn = QPushButton("クリア")
         file_buttons.addWidget(self.add_files_btn)
@@ -436,6 +434,12 @@ class MainWindow(QMainWindow):
         results_group = QGroupBox("処理結果")
         results_layout = QVBoxLayout(results_group)
         
+        results_buttons = QHBoxLayout()
+        self.open_output_btn = QPushButton("📁 出力フォルダを開く")
+        results_buttons.addWidget(self.open_output_btn)
+        results_buttons.addStretch()
+        results_layout.addLayout(results_buttons)
+        
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(4)
         self.results_table.setHorizontalHeaderLabels(["ファイル名", "状態", "処理時間", "出力"])
@@ -459,7 +463,7 @@ class MainWindow(QMainWindow):
         
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(6)
-        self.history_table.setHorizontalHeaderLabels(["ファイル名", "プロジェクト", "開始時刻", "状態", "処理時間", "話者数"])
+        self.history_table.setHorizontalHeaderLabels(["ファイル名", "プリセット", "開始時刻", "状態", "処理時間", "話者数"])
         self.history_table.horizontalHeader().setStretchLastSection(True)
         history_layout.addWidget(self.history_table)
         
@@ -487,9 +491,9 @@ class MainWindow(QMainWindow):
         layout.addRow(label_text, container)
         
     def setup_connections(self):
-        self.save_project_btn.clicked.connect(self.save_project)
-        self.load_project_btn.clicked.connect(self.load_project)
-        self.delete_project_btn.clicked.connect(self.delete_project)
+        self.save_preset_btn.clicked.connect(self.save_preset)
+        self.load_preset_btn.clicked.connect(self.load_preset)
+        self.delete_preset_btn.clicked.connect(self.delete_preset)
         
         self.add_files_btn.clicked.connect(self.add_files)
         self.add_folder_btn.clicked.connect(self.add_folder)
@@ -509,50 +513,50 @@ class MainWindow(QMainWindow):
         self.refresh_history_btn.clicked.connect(self.refresh_history)
         self.clear_history_btn.clicked.connect(self.clear_history)
         
-        self.refresh_project_list()
+        self.refresh_preset_list()
         
-    def refresh_project_list(self):
-        current_text = self.project_combo.currentText()
-        self.project_combo.clear()
-        projects = self.project_manager.list_projects()
-        self.project_combo.addItems(projects)
+    def refresh_preset_list(self):
+        current_text = self.preset_combo.currentText()
+        self.preset_combo.clear()
+        presets = self.settings_manager.list_presets()
+        self.preset_combo.addItems(presets)
         if current_text:
-            self.project_combo.setCurrentText(current_text)
+            self.preset_combo.setCurrentText(current_text)
             
-    def save_project(self):
-        config = self.get_current_config()
-        if config.name.strip():
-            self.project_manager.save_project(config)
-            self.refresh_project_list()
-            QMessageBox.information(self, "保存完了", f"プロジェクト '{config.name}' を保存しました。")
+    def save_preset(self):
+        preset = self.get_current_preset()
+        if preset.name.strip():
+            self.settings_manager.save_preset(preset)
+            self.refresh_preset_list()
+            QMessageBox.information(self, "保存完了", f"設定プリセット '{preset.name}' を保存しました。")
         else:
-            QMessageBox.warning(self, "エラー", "プロジェクト名を入力してください。")
+            QMessageBox.warning(self, "エラー", "プリセット名を入力してください。")
             
-    def load_project(self):
-        name = self.project_combo.currentText().strip()
+    def load_preset(self):
+        name = self.preset_combo.currentText().strip()
         if name:
-            config = self.project_manager.load_project(name)
-            if config:
-                self.apply_config(config)
-                QMessageBox.information(self, "読み込み完了", f"プロジェクト '{name}' を読み込みました。")
+            preset = self.settings_manager.load_preset(name)
+            if preset:
+                self.apply_preset(preset)
+                QMessageBox.information(self, "読み込み完了", f"設定プリセット '{name}' を読み込みました。")
             else:
-                QMessageBox.warning(self, "エラー", f"プロジェクト '{name}' が見つかりません。")
+                QMessageBox.warning(self, "エラー", f"設定プリセット '{name}' が見つかりません。")
                 
-    def delete_project(self):
-        name = self.project_combo.currentText().strip()
+    def delete_preset(self):
+        name = self.preset_combo.currentText().strip()
         if name:
             reply = QMessageBox.question(
-                self, "確認", f"プロジェクト '{name}' を削除しますか？",
+                self, "確認", f"設定プリセット '{name}' を削除しますか？",
                 QMessageBox.Yes | QMessageBox.No
             )
             if reply == QMessageBox.Yes:
-                self.project_manager.delete_project(name)
-                self.refresh_project_list()
-                QMessageBox.information(self, "削除完了", f"プロジェクト '{name}' を削除しました。")
+                self.settings_manager.delete_preset(name)
+                self.refresh_preset_list()
+                QMessageBox.information(self, "削除完了", f"設定プリセット '{name}' を削除しました。")
                 
-    def get_current_config(self) -> ProjectConfig:
-        return ProjectConfig(
-            name=self.project_combo.currentText().strip(),
+    def get_current_preset(self) -> SettingsPreset:
+        return SettingsPreset(
+            name=self.preset_combo.currentText().strip(),
             model_size=self.model_combo.currentText(),
             language=self.language_combo.currentText(),
             device=self.device_combo.currentText(),
@@ -565,27 +569,27 @@ class MainWindow(QMainWindow):
             output_dir=self.output_dir_edit.text()
         )
         
-    def apply_config(self, config: ProjectConfig):
-        self.model_combo.setCurrentText(config.model_size)
-        self.language_combo.setCurrentText(config.language)
-        self.device_combo.setCurrentText(config.device)
-        self.compute_combo.setCurrentText(config.compute_type)
-        self.beam_size_spin.setValue(config.beam_size)
-        self.vad_check.setChecked(config.use_vad)
-        self.min_silence_spin.setValue(config.min_silence_ms)
-        self.diarization_check.setChecked(config.enable_diarization)
-        self.max_speakers_spin.setValue(config.max_speakers)
-        self.output_dir_edit.setText(config.output_dir)
+    def apply_preset(self, preset: SettingsPreset):
+        self.model_combo.setCurrentText(preset.model_size)
+        self.language_combo.setCurrentText(preset.language)
+        self.device_combo.setCurrentText(preset.device)
+        self.compute_combo.setCurrentText(preset.compute_type)
+        self.beam_size_spin.setValue(preset.beam_size)
+        self.vad_check.setChecked(preset.use_vad)
+        self.min_silence_spin.setValue(preset.min_silence_ms)
+        self.diarization_check.setChecked(preset.enable_diarization)
+        self.max_speakers_spin.setValue(preset.max_speakers)
+        self.output_dir_edit.setText(preset.output_dir)
         
-    def load_last_project(self):
-        default_config = self.project_manager.load_project("デフォルト")
-        if default_config:
-            self.apply_config(default_config)
+    def load_last_preset(self):
+        default_preset = self.settings_manager.load_preset("デフォルト")
+        if default_preset:
+            self.apply_preset(default_preset)
             
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "音声・動画ファイルを選択",
-            "", "Audio/Video Files (*.wav *.mp3 *.m4a *.mp4 *.avi *.mov *.flv)"
+            self, "WAVファイルを選択",
+            "", "WAV Files (*.wav)"
         )
         
         for file_path in files:
@@ -593,16 +597,16 @@ class MainWindow(QMainWindow):
             self.file_list.addItem(item)
             
         if self.worker.isRunning():
-            config = self.get_current_config()
+            preset = self.get_current_preset()
             for file_path in files:
-                job = ProcessingJob(Path(file_path), config)
+                job = ProcessingJob(Path(file_path), preset)
                 self.worker.add_job(job)
                 
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "フォルダを選択")
         if folder:
             folder_path = Path(folder)
-            extensions = ['.wav', '.mp3', '.m4a', '.mp4', '.avi', '.mov', '.flv']
+            extensions = ['.wav']
             
             new_files = []
             for ext in extensions:
@@ -612,9 +616,9 @@ class MainWindow(QMainWindow):
                     new_files.append(str(file_path))
                     
             if self.worker.isRunning() and new_files:
-                config = self.get_current_config()
+                preset = self.get_current_preset()
                 for file_path in new_files:
-                    job = ProcessingJob(Path(file_path), config)
+                    job = ProcessingJob(Path(file_path), preset)
                     self.worker.add_job(job)
                     
     def clear_files(self):
@@ -637,12 +641,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "処理するファイルを選択してください。")
             return
             
-        config = self.get_current_config()
+        preset = self.get_current_preset()
         self.jobs.clear()
         
         for i in range(self.file_list.count()):
             file_path = Path(self.file_list.item(i).text())
-            job = ProcessingJob(file_path, config)
+            job = ProcessingJob(file_path, preset)
             self.jobs.append(job)
             self.worker.add_job(job)
             
@@ -684,7 +688,7 @@ class MainWindow(QMainWindow):
                 self.results_table.setItem(i, 1, QTableWidgetItem("完了"))
                 self.results_table.setItem(i, 2, QTableWidgetItem(f"{result.get('processing_time', 0):.2f}秒"))
                 
-                output_dir = Path(self.get_current_config().output_dir) / f"output_{Path(file_path).stem}"
+                output_dir = Path(self.get_current_preset().output_dir) / f"output_{Path(file_path).stem}"
                 csv_files = list(output_dir.glob("*.csv"))
                 if csv_files:
                     self.results_table.setItem(i, 3, QTableWidgetItem(f"{len(csv_files)} CSVファイル"))

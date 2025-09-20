@@ -14,8 +14,8 @@ def test_imports():
     
     try:
         from fwhisper_batch.gui_app import (
-            ProjectConfig, ProcessingJob, ResultsDatabase, TranscriptionWorker, 
-            ProjectManager, MainWindow, main, HELP_TOOLTIPS
+            SettingsPreset, ProcessingJob, ResultsDatabase, TranscriptionWorker, 
+            SettingsManager, MainWindow, main, HELP_TOOLTIPS
         )
         print("✅ GUI v2 imports successful")
         return True
@@ -25,32 +25,32 @@ def test_imports():
         traceback.print_exc()
         return False
 
-def test_project_config_defaults():
-    """Test that ProjectConfig has correct default values"""
-    print("\nTesting ProjectConfig defaults...")
+def test_settings_preset_defaults():
+    """Test that SettingsPreset has correct default values"""
+    print("\nTesting SettingsPreset defaults...")
     
     try:
-        from fwhisper_batch.gui_app import ProjectConfig
+        from fwhisper_batch.gui_app import SettingsPreset
         
-        config = ProjectConfig(name="test")
+        preset = SettingsPreset(name="test")
         
-        if config.max_speakers == 2:
+        if preset.max_speakers == 2:
             print("✅ Default max_speakers is correctly set to 2")
         else:
-            print(f"❌ Default max_speakers is {config.max_speakers}, expected 2")
+            print(f"❌ Default max_speakers is {preset.max_speakers}, expected 2")
             return False
             
-        if config.model_size == "large-v3":
+        if preset.model_size == "large-v3":
             print("✅ Default model_size is correctly set to large-v3")
         else:
-            print(f"❌ Default model_size is {config.model_size}, expected large-v3")
+            print(f"❌ Default model_size is {preset.model_size}, expected large-v3")
             return False
             
-        print("✅ ProjectConfig defaults test passed")
+        print("✅ SettingsPreset defaults test passed")
         return True
         
     except Exception as e:
-        print(f"❌ ProjectConfig defaults test failed: {e}")
+        print(f"❌ SettingsPreset defaults test failed: {e}")
         return False
 
 def test_results_database():
@@ -58,16 +58,16 @@ def test_results_database():
     print("\nTesting ResultsDatabase...")
     
     try:
-        from fwhisper_batch.gui_app import ResultsDatabase, ProcessingJob, ProjectConfig
+        from fwhisper_batch.gui_app import ResultsDatabase, ProcessingJob, SettingsPreset
         
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "test.db"
             db = ResultsDatabase(db_path)
             
-            config = ProjectConfig(name="test_project")
+            preset = SettingsPreset(name="test_preset")
             job = ProcessingJob(
                 file_path=Path("test.wav"),
-                project_config=config,
+                settings_preset=preset,
                 status="完了",
                 result={"processing_time": 10.5, "diarization": {"segments_with_speakers": 3}}
             )
@@ -162,7 +162,7 @@ if __name__ == "__main__":
     
     results = []
     results.append(test_imports())
-    results.append(test_project_config_defaults())
+    results.append(test_settings_preset_defaults())
     results.append(test_results_database())
     results.append(test_help_tooltips())
     results.append(test_transcription_integration())
