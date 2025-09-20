@@ -472,7 +472,12 @@ class MainWindow(QMainWindow):
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(4)
         self.results_table.setHorizontalHeaderLabels(["ファイル名", "状態", "処理時間", "出力"])
-        self.results_table.horizontalHeader().setStretchLastSection(True)
+        
+        self.results_table.setColumnWidth(0, 200)  # ファイル名
+        self.results_table.setColumnWidth(1, 150)  # 状態（幅を広げる）
+        self.results_table.setColumnWidth(2, 100)  # 処理時間
+        self.results_table.horizontalHeader().setStretchLastSection(True)  # 出力列は残りスペースを使用
+        
         results_layout.addWidget(self.results_table)
         
         processing_layout.addWidget(results_group)
@@ -493,7 +498,14 @@ class MainWindow(QMainWindow):
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(6)
         self.history_table.setHorizontalHeaderLabels(["ファイル名", "プリセット", "開始時刻", "状態", "処理時間", "話者数"])
-        self.history_table.horizontalHeader().setStretchLastSection(True)
+        
+        self.history_table.setColumnWidth(0, 150)  # ファイル名
+        self.history_table.setColumnWidth(1, 120)  # プリセット
+        self.history_table.setColumnWidth(2, 140)  # 開始時刻
+        self.history_table.setColumnWidth(3, 120)  # 状態（幅を広げる）
+        self.history_table.setColumnWidth(4, 100)  # 処理時間
+        self.history_table.horizontalHeader().setStretchLastSection(True)  # 話者数列は残りスペースを使用
+        
         history_layout.addWidget(self.history_table)
         
         self.tab_widget.addTab(history_tab, "履歴")
