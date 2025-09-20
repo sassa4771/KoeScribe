@@ -21,6 +21,7 @@ from PySide6.QtCore import QThread, Signal, QTimer, Qt, QSettings, QUrl
 from PySide6.QtGui import QFont, QIcon, QDesktopServices
 
 import pandas as pd
+from dotenv import load_dotenv
 from faster_whisper import WhisperModel
 
 from .transcribe_batch import (
@@ -276,6 +277,8 @@ class SettingsManager:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        load_dotenv()
+        
         self.settings_manager = SettingsManager()
         self.worker = TranscriptionWorker()
         self.current_preset = SettingsPreset(name="デフォルト")
