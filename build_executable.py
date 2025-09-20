@@ -23,23 +23,34 @@ def build_executable():
     project_root = Path(__file__).parent
     os.chdir(project_root)
     
+    path_sep = ";" if os.name == "nt" else ":"
+    
     cmd = [
         "pyinstaller",
         "--onefile",                    # Single executable file
         "--windowed",                   # No console window (GUI app)
-        "--name", "FWhisper-GUI",       # Executable name
-        "--icon", "icon.ico",           # Icon file (if exists)
-        "--add-data", "config.json;.",  # Include config file
-        "--add-data", ".env;.",         # Include .env file
-        "--hidden-import", "PySide6",
-        "--hidden-import", "faster_whisper",
-        "--hidden-import", "pyannote.audio",
-        "--hidden-import", "soundfile",
-        "--hidden-import", "webrtcvad",
-        "--collect-all", "PySide6",
-        "--collect-all", "faster_whisper",
+        "--name=FWhisper-GUI",          # Executable name
+        "--hidden-import=PySide6",
+        "--hidden-import=faster_whisper",
+        "--hidden-import=pyannote.audio",
+        "--hidden-import=soundfile",
+        "--hidden-import=webrtcvad",
+        "--collect-all=PySide6",
+        "--collect-all=faster_whisper",
         "src/fwhisper_batch/gui_app.py"
     ]
+    
+    icon_path = project_root / "icon.ico"
+    if icon_path.exists():
+        cmd.insert(-1, f"--icon={icon_path}")
+    
+    config_path = project_root / "config.json"
+    if config_path.exists():
+        cmd.insert(-1, f"--add-data=config.json{path_sep}.")
+    
+    env_path = project_root / ".env"
+    if env_path.exists():
+        cmd.insert(-1, f"--add-data=.env{path_sep}.")
     
     print("🔨 Building executable...")
     print(f"Command: {' '.join(cmd)}")
@@ -47,11 +58,15 @@ def build_executable():
     try:
         subprocess.run(cmd, check=True)
         print("✅ Build completed successfully!")
-        print("📁 Executable location: dist/FWhisper-GUI.exe")
+        
+        exe_ext = ".exe" if os.name == "nt" else ""
+        exe_path = f"dist/FWhisper-GUI{exe_ext}"
+        print(f"📁 Executable location: {exe_path}")
         
         print("\n📋 Distribution Instructions:")
-        print("1. Copy the executable from dist/FWhisper-GUI.exe")
-        print("2. Include config.json and .env files in the same directory")
+        print(f"1. Copy the executable from {exe_path}")
+        if config_path.exists() or env_path.exists():
+            print("2. Include config.json and .env files in the same directory")
         print("3. Ensure target machine has required audio codecs")
         
     except subprocess.CalledProcessError as e:
