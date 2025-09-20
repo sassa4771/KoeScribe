@@ -87,7 +87,10 @@ class ResultsDatabase:
                 end_time TIMESTAMP,
                 status TEXT,
                 processing_time REAL,
-                speaker_count INTEGER,
+                estimated_language TEXT,
+                audio_duration REAL,
+                word_timestamps TEXT,
+                vad_settings TEXT,
                 output_directory TEXT,
                 error_message TEXT
             )
@@ -98,10 +101,18 @@ class ResultsDatabase:
     def save_result(self, job: ProcessingJob) -> int:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        
+        estimated_language = job.result.get('language', '') if job.result else ''
+        audio_duration = job.result.get('duration', 0) if job.result else 0
+        word_timestamps = 'あり' if job.result and job.result.get('words_count', 0) > 0 else 'なし'
+        vad_settings = f"VAD: {'ON' if job.settings_preset.use_vad else 'OFF'}"
+        if job.settings_preset.use_vad:
+            vad_settings += f" (min_silence_ms={job.settings_preset.min_silence_ms})"
+        
         cursor.execute("""
             INSERT INTO processing_results 
-            (file_path, project_name, start_time, end_time, status, processing_time, speaker_count, output_directory, error_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (file_path, project_name, start_time, end_time, status, processing_time, estimated_language, audio_duration, word_timestamps, vad_settings, output_directory, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             str(job.file_path),
             job.settings_preset.name,
@@ -109,7 +120,10 @@ class ResultsDatabase:
             datetime.now(),
             job.status,
             job.result.get('processing_time', 0) if job.result else 0,
-            job.result.get('diarization', {}).get('segments_with_speakers', 0) if job.result and job.result.get('diarization') else 0,
+            estimated_language,
+            audio_duration,
+            word_timestamps,
+            vad_settings,
             job.settings_preset.output_dir,
             job.error
         ))
@@ -590,15 +604,16 @@ class MainWindow(QMainWindow):
         history_layout.addLayout(history_buttons)
         
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(6)
-        self.history_table.setHorizontalHeaderLabels(["ファイル名", "プリセット", "開始時刻", "状態", "処理時間", "話者数"])
+        self.history_table.setColumnCount(7)
+        self.history_table.setHorizontalHeaderLabels(["ファイル名", "プリセット", "開始時刻", "状態", "処理時間", "言語", "音声長"])
         
-        self.history_table.setColumnWidth(0, 150)  # ファイル名
-        self.history_table.setColumnWidth(1, 120)  # プリセット
-        self.history_table.setColumnWidth(2, 140)  # 開始時刻
-        self.history_table.setColumnWidth(3, 120)  # 状態（幅を広げる）
-        self.history_table.setColumnWidth(4, 100)  # 処理時間
-        self.history_table.horizontalHeader().setStretchLastSection(True)  # 話者数列は残りスペースを使用
+        self.history_table.setColumnWidth(0, 140)  # ファイル名
+        self.history_table.setColumnWidth(1, 100)  # プリセット
+        self.history_table.setColumnWidth(2, 130)  # 開始時刻
+        self.history_table.setColumnWidth(3, 100)  # 状態
+        self.history_table.setColumnWidth(4, 80)   # 処理時間
+        self.history_table.setColumnWidth(5, 60)   # 言語
+        self.history_table.horizontalHeader().setStretchLastSection(True)  # 音声長列は残りスペースを使用
         
         history_layout.addWidget(self.history_table)
         
@@ -905,7 +920,19 @@ class MainWindow(QMainWindow):
             self.history_table.setItem(i, 2, QTableWidgetItem(str(result['start_time'])[:19]))
             self.history_table.setItem(i, 3, QTableWidgetItem(result['status']))
             self.history_table.setItem(i, 4, QTableWidgetItem(f"{result['processing_time']:.2f}秒" if result['processing_time'] else ""))
-            self.history_table.setItem(i, 5, QTableWidgetItem(str(result['speaker_count']) if result['speaker_count'] else ""))
+            self.history_table.setItem(i, 5, QTableWidgetItem(result['estimated_language'] or ""))
+            self.history_table.setItem(i, 6, QTableWidgetItem(f"{result['audio_duration']:.2f}秒" if result['audio_duration'] else ""))
+            
+            if result['processing_time'] and result['estimated_language']:
+                tooltip_text = f"処理時間: {result['processing_time']:.2f} 秒\n"
+                tooltip_text += f"推定言語: {result['estimated_language']}\n"
+                tooltip_text += f"音声長: {result['audio_duration']:.2f} 秒\n"
+                tooltip_text += f"単語タイムスタンプ: {result['word_timestamps'] or 'なし'}\n"
+                tooltip_text += f"{result['vad_settings'] or 'VAD: OFF'}"
+                
+                for col in range(7):
+                    if self.history_table.item(i, col):
+                        self.history_table.item(i, col).setToolTip(tooltip_text)
             
     def clear_history(self):
         reply = QMessageBox.question(
