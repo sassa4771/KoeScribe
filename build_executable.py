@@ -31,7 +31,9 @@ def build_executable():
         "--windowed",                   # No console window (GUI app)
         "--name=FWhisper-GUI",          # Executable name
         "--paths=src",                  # Add src to Python path
-        "--hidden-import=PySide6",
+        "--hidden-import=PySide6.QtCore",
+        "--hidden-import=PySide6.QtGui", 
+        "--hidden-import=PySide6.QtWidgets",
         "--hidden-import=faster_whisper",
         "--hidden-import=pyannote.audio",
         "--hidden-import=soundfile",
@@ -39,8 +41,11 @@ def build_executable():
         "--hidden-import=fwhisper_batch",
         "--hidden-import=fwhisper_batch.transcribe_batch",
         "--hidden-import=fwhisper_batch.gui_app",
-        "--collect-all=PySide6",
-        "--collect-all=faster_whisper",
+        "--exclude-module=torch",
+        "--exclude-module=torchaudio", 
+        "--exclude-module=torchvision",
+        "--exclude-module=nvidia",
+        "--exclude-module=cuda",
         "src/fwhisper_batch/gui_app.py"
     ]
     
@@ -94,7 +99,9 @@ a = Analysis(
         ('.env', '.'),
     ],
     hiddenimports=[
-        'PySide6',
+        'PySide6.QtCore',
+        'PySide6.QtGui', 
+        'PySide6.QtWidgets',
         'faster_whisper',
         'pyannote.audio',
         'soundfile',
@@ -109,7 +116,13 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'torch',
+        'torchaudio',
+        'torchvision', 
+        'nvidia',
+        'cuda',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
