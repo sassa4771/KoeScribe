@@ -56,11 +56,11 @@ def is_diarization_enabled(cfg: Dict[str, Any]) -> bool:
     return bool(cfg.get("diarize_model")) and bool(os.getenv("HUGGINGFACE_TOKEN"))
 
 
-def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], words: List[Dict[str, Any]]) -> Optional[str]:
+def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], words: List[Dict[str, Any]], segments: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Perform diarization and merge with ASR results"""
     try:
         from tools.diarize import diarize_one
-        from tools.merge_speakers import assign_speakers_to_words, to_runs
+        from tools.merge_speakers import assign_speakers_to_words
         
         token = os.getenv("HUGGINGFACE_TOKEN")
         if not token:
@@ -85,13 +85,13 @@ def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], word
         labeled_words = assign_speakers_to_words(words, spans, smooth_min_sec=0.6)
         write_jsonl(out_dir / f"{audio_path.stem}_words_with_speakers.jsonl", labeled_words)
         
-        runs = to_runs(labeled_words)
-        speaker_transcript_path = out_dir / f"{audio_path.stem}_speaker_transcription.txt"
-        with speaker_transcript_path.open("w", encoding="utf-8") as f:
-            for r in runs:
-                f.write(f"[{r['speaker']}] {r['text'].strip()}\n")
+        labeled_segments = assign_speakers_to_words(segments, spans, smooth_min_sec=0.6)
+        write_jsonl(out_dir / f"{audio_path.stem}_segments_with_speakers.jsonl", labeled_segments)
         
-        return str(speaker_transcript_path)
+        return {
+            "words_with_speakers": len(labeled_words),
+            "segments_with_speakers": len(labeled_segments)
+        }
         
     except ImportError as e:
         print(f"[warning] Diarization dependencies not available: {e}")
@@ -116,12 +116,11 @@ def transcribe_one(
 ) -> Dict[str, Any]:
     """
     1ファイルを文字起こしして出力一式を保存する。
-    - TXT: <stem>_transcription.txt
     - JSONL: <stem>_segments.jsonl
     - JSONL: <stem>_words.jsonl（word_timestamps=True の時だけ）
     - TXT: <stem>_processing_time.txt
-    - TXT: <stem>_speaker_transcription.txt（enable_diarization=True の時だけ）
     - JSONL: <stem>_words_with_speakers.jsonl（enable_diarization=True の時だけ）
+    - JSONL: <stem>_segments_with_speakers.jsonl（enable_diarization=True の時だけ）
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -177,7 +176,6 @@ def transcribe_one(
     proc_time = end - start
 
     # 保存
-    (out_dir / f"{audio_path.stem}_transcription.txt").write_text(text, encoding="utf-8")
     write_jsonl(out_dir / f"{audio_path.stem}_segments.jsonl", rows_segments)
     if word_timestamps and rows_words:
         write_jsonl(out_dir / f"{audio_path.stem}_words.jsonl", rows_words)
@@ -200,8 +198,9 @@ def transcribe_one(
     }
     
     if enable_diarization and diarization_config and rows_words:
-        speaker_transcript = diarize_and_merge(audio_path, out_dir, diarization_config, rows_words)
-        result["speaker_transcript"] = speaker_transcript
+        diarization_result = diarize_and_merge(audio_path, out_dir, diarization_config, rows_words, rows_segments)
+        if diarization_result:
+            result["diarization"] = diarization_result
     
     return result
 
@@ -271,8 +270,9 @@ def main():
         print(preview + ("..." if len(result["text"]) > len(preview) else ""))
         if use_word_timestamps:
             print(f"words.jsonl: {result['words_count']} words")
-        if enable_diarization and result.get("speaker_transcript"):
-            print(f"speaker transcription: {result['speaker_transcript']}")
+        if enable_diarization and result.get("diarization"):
+            diar_info = result["diarization"]
+            print(f"diarization: {diar_info['words_with_speakers']} words, {diar_info['segments_with_speakers']} segments with speakers")
 
 if __name__ == "__main__":
     main()
