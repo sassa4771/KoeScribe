@@ -102,22 +102,6 @@ uv run fwhisper-batch --config config.json --disable-diarization
 - NVIDIA GPU + 最新ドライバがあれば自動でGPU使用
 - CUDA Toolkit等の追加インストール不要
 
-### 実行ファイルのビルド方法
-開発者向け：独自の実行ファイルを作成する場合
-
-```bash
-# ビルドスクリプトを実行
-uv run python build_executable.py
-```
-
-**ビルド要件：**
-- PyInstaller（自動インストール）
-- 全依存関係がインストール済み
-- config.json と .env ファイル
-
-**出力：**
-- `dist/FWhisper-GUI.exe`（Windows）
-- 必要ファイル：config.json, .env（同じフォルダに配置）
 
 ---
 
