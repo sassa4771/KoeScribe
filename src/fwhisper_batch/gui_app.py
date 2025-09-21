@@ -150,6 +150,7 @@ class ResultsDatabase:
 class TranscriptionWorker(QThread):
     progress_updated = Signal(str, float, str)
     phase_progress_updated = Signal(str, int, float, str)  # file_path, phase_index, progress, phase_name
+    timer_updated = Signal(str, float)  # file_path, elapsed_seconds
     job_completed = Signal(str, dict)
     job_failed = Signal(str, str)
     queue_updated = Signal(int)
@@ -188,6 +189,9 @@ class TranscriptionWorker(QThread):
         
     def process_job(self, job: ProcessingJob):
         try:
+            import time
+            job_start_time = time.time()
+            
             self.progress_updated.emit(str(job.file_path), 0.0, "モデル読み込み中...")
             self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "モデル読み込み中")
             
@@ -264,17 +268,24 @@ class TranscriptionWorker(QThread):
         )
     
     def _perform_diarization(self, job: ProcessingJob, output_dir: Path, transcription_result: Dict[str, Any]):
-        """Perform speaker diarization"""
+        """Perform speaker diarization with detailed progress tracking"""
         if not job.settings_preset.enable_diarization:
             return None
             
         try:
+            import time
+            
+            self.phase_progress_updated.emit(str(job.file_path), 1, 10.0, "話者分離モデル読み込み中")
+            time.sleep(0.1)  # Small delay to show progress
+            
             words_file = output_dir / f"{job.file_path.stem}_words.jsonl"
             segments_file = output_dir / f"{job.file_path.stem}_segments.jsonl"
             
             if not words_file.exists() or not segments_file.exists():
                 return None
-                
+            
+            self.phase_progress_updated.emit(str(job.file_path), 1, 30.0, "音声データ解析中")
+            
             words = []
             with open(words_file, 'r', encoding='utf-8') as f:
                 for line in f:
@@ -287,8 +298,17 @@ class TranscriptionWorker(QThread):
                     if line.strip():
                         segments.append(json.loads(line))
             
+            self.phase_progress_updated.emit(str(job.file_path), 1, 55.0, "話者埋め込み抽出中")
+            
             config = asdict(job.settings_preset)
-            return diarize_and_merge(job.file_path, output_dir, config, words, segments)
+            
+            self.phase_progress_updated.emit(str(job.file_path), 1, 80.0, "話者クラスタリング中")
+            
+            result = diarize_and_merge(job.file_path, output_dir, config, words, segments)
+            
+            self.phase_progress_updated.emit(str(job.file_path), 1, 95.0, "話者ラベル統合中")
+            
+            return result
             
         except Exception as e:
             print(f"[warning] Diarization failed: {e}")
@@ -360,6 +380,11 @@ class MainWindow(QMainWindow):
         self.current_preset = SettingsPreset(name="デフォルト")
         self.jobs: List[ProcessingJob] = []
         self.results_db = ResultsDatabase()
+        
+        self.processing_timer = QTimer()
+        self.processing_timer.timeout.connect(self.update_processing_time)
+        self.current_processing_file = None
+        self.processing_start_time = None
         
         self.setup_ui()
         self.setup_connections()
@@ -656,6 +681,7 @@ class MainWindow(QMainWindow):
         
         self.worker.progress_updated.connect(self.update_progress)
         self.worker.phase_progress_updated.connect(self.update_phase_progress)
+        self.worker.timer_updated.connect(self.update_timer_display)
         self.worker.job_completed.connect(self.job_completed)
         self.worker.job_failed.connect(self.job_failed)
         self.worker.queue_updated.connect(self.update_queue_count)
@@ -805,6 +831,10 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         
+        if self.jobs:
+            first_file = str(self.jobs[0].file_path)
+            self.start_processing_timer(first_file)
+        
         self.results_table.setRowCount(len(self.jobs))
         for i, job in enumerate(self.jobs):
             self.results_table.setItem(i, 0, QTableWidgetItem(job.file_path.name))
@@ -872,6 +902,9 @@ class MainWindow(QMainWindow):
     def job_completed(self, file_path: str, result: Dict[str, Any]):
         file_name = Path(file_path).name
         
+        if self.current_processing_file == file_path:
+            self.stop_processing_timer()
+        
         for i in range(self.results_table.rowCount()):
             if self.results_table.item(i, 0).text() == file_name:
                 current_status = self.stage_label.text()
@@ -896,6 +929,24 @@ class MainWindow(QMainWindow):
                 if csv_files:
                     self.results_table.setItem(i, 3, QTableWidgetItem(f"{len(csv_files)} CSVファイル"))
                 break
+        
+        if not self.worker.jobs.empty():
+            try:
+                next_job = None
+                temp_jobs = []
+                while not self.worker.jobs.empty():
+                    job = self.worker.jobs.get_nowait()
+                    temp_jobs.append(job)
+                    if next_job is None:
+                        next_job = job
+                
+                for job in temp_jobs:
+                    self.worker.jobs.put(job)
+                
+                if next_job:
+                    self.start_processing_timer(str(next_job.file_path))
+            except:
+                pass  # Queue handling error, continue without timer
                 
         if not self.worker.isRunning() and self.worker.jobs.empty():
             self.start_btn.setEnabled(True)
@@ -952,6 +1003,34 @@ class MainWindow(QMainWindow):
             conn.close()
             self.refresh_history()
             QMessageBox.information(self, "削除完了", "処理履歴を削除しました。")
+    
+    def update_timer_display(self, file_path: str, elapsed_seconds: float):
+        """Update real-time processing time in results table"""
+        file_name = Path(file_path).name
+        for i in range(self.results_table.rowCount()):
+            if self.results_table.item(i, 0).text() == file_name:
+                self.results_table.setItem(i, 2, QTableWidgetItem(f"{elapsed_seconds:.1f}秒 (処理中)"))
+                break
+
+    def update_processing_time(self):
+        """Called by QTimer to update processing time display"""
+        if self.current_processing_file and self.processing_start_time:
+            import time
+            elapsed = time.time() - self.processing_start_time
+            self.update_timer_display(self.current_processing_file, elapsed)
+
+    def start_processing_timer(self, file_path: str):
+        """Start the processing timer for a file"""
+        import time
+        self.current_processing_file = file_path
+        self.processing_start_time = time.time()
+        self.processing_timer.start(500)  # Update every 500ms
+
+    def stop_processing_timer(self):
+        """Stop the processing timer"""
+        self.processing_timer.stop()
+        self.current_processing_file = None
+        self.processing_start_time = None
 
 
 def main():
