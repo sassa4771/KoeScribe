@@ -1,74 +1,135 @@
-# fwhisper-batch — Faster-Whisper batch transcriber with GUI
+# FWhisper-Batch — 音声文字起こし・話者分離 GUI アプリケーション
 
-Faster-Whisper（CTranslate2版 Whisper）を **uv** で管理して、音声ファイルを一括で文字起こし・話者分離する統合システムです。  
-Windows / macOS / Linux で動作します。PyTorch は不要です（CTranslate2 を使用）。
-
----
-
-## ✅ 特長
-- **高速・省メモリ**：CPU/ミドル級GPUで扱いやすい
-- **日本語安定**：`language="ja"` 指定・VAD で長時間録音に強い
-- **話者分離対応**：pyannote.audioで「誰がいつ何を話したか」を識別
-- **GUI & CLI両対応**：使いやすいGUIアプリケーションとコマンドライン
-- **エントリポイント**：`uv run fwhisper-batch` (CLI) / `uv run fwhisper-gui` (GUI)
+Faster-Whisper と pyannote.audio を使用した、高精度な音声文字起こしと話者分離を行うデスクトップアプリケーションです。  
+**Windows / macOS / Linux** 対応、直感的なGUIで複数ファイルの一括処理が可能です。
 
 ---
 
-## 📦 前提
-- Python 3.9+
-- **uv** インストール（https://docs.astral.sh/uv/）
-- **ffmpeg** が PATH にあること  
-  - macOS: `brew install ffmpeg` / Ubuntu: `sudo apt-get install -y ffmpeg`  
-  - Windows: `winget install Gyan.FFmpeg` などで導入し、PATH を通す
+## ✨ 主な機能
+
+- 🎯 **高精度文字起こし**: Faster-Whisper による高速・高精度な音声認識
+- 👥 **話者分離**: 誰がいつ話したかを自動識別（pyannote.audio）
+- 🖥️ **直感的GUI**: ドラッグ&ドロップ対応の使いやすいインターフェース
+- 📊 **リアルタイム進捗**: 処理状況と経過時間をリアルタイム表示
+- 🔄 **キュー処理**: 複数ファイルの連続処理に対応
+- 📈 **CSV出力**: 結果をCSV形式でダウンロード可能
+- 💾 **設定管理**: プロジェクトごとの設定保存・管理
+- 🎛️ **詳細設定**: 話者数、モデルサイズ、出力形式などを柔軟に設定
 
 ---
 
-## 🚀 セットアップ & 実行
+## 🔧 システム要件
 
-### 1) 初回セットアップ
+- **Python**: 3.9以上（3.10-3.11推奨）
+- **OS**: Windows 10/11, macOS 10.15+, Ubuntu 18.04+
+- **メモリ**: 8GB以上推奨（4GBでも動作可能）
+- **GPU**: NVIDIA GPU推奨（CPUでも動作）
+- **ffmpeg**: 音声・動画ファイル処理に必要
+
+---
+
+## 📦 インストール
+
+### 1. 前提条件のインストール
+
+#### Windows
+```powershell
+# uvをインストール
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# ffmpegをインストール
+winget install Gyan.FFmpeg
+```
+
+#### macOS
 ```bash
-# プロジェクト直下（pyproject.toml がある場所）で
-uv venv
+# uvをインストール
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# ffmpegをインストール
+brew install ffmpeg
+```
+
+#### Linux (Ubuntu/Debian)
+```bash
+# uvをインストール
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# ffmpegをインストール
+sudo apt update && sudo apt install -y ffmpeg
+```
+
+### 2. プロジェクトのセットアップ
+
+```bash
+# リポジトリをクローン
+git clone https://github.com/sassa4771/whisper-local-server_CPU.git
+cd whisper-local-server_CPU
+
+# 依存関係をインストール
 uv sync
 ```
 
-### 2) 設定ファイルの作成
-```bash
-cp config.json.example config.json
-# エディタで root_dir / audio_files / output_dir などを編集
-```
+**注意**: 以前のバージョンで `webrtcvad` のビルドエラーが発生していた場合、最新版では依存関係から削除されているため、エラーは解消されています。
 
-### 3) 話者分離機能の設定（オプション）
-話者分離機能を使用する場合は、`.env`ファイルを作成してHugging Face トークンを設定：
+### 3. 話者分離機能の設定（オプション）
+
+話者分離機能を使用する場合は、Hugging Face トークンが必要です：
+
+#### Hugging Face トークンの取得
+1. [Hugging Face](https://huggingface.co) でアカウントを作成
+2. [Settings > Access Tokens](https://huggingface.co/settings/tokens) でアクセストークンを作成
+3. **Read** 権限のトークンを生成
+
+#### 設定ファイルの作成
+プロジェクトルートに `.env` ファイルを作成：
 
 ```bash
 # .envファイルを作成
 echo "HUGGINGFACE_TOKEN=hf_your_token_here" > .env
 ```
 
-**Hugging Face トークンの取得方法：**
-1. https://huggingface.co でアカウント作成
-2. Settings → Access Tokens → New token
-3. Read権限のトークンを作成
-4. 生成されたトークンを`.env`ファイルに設定
+**Windows PowerShell の場合:**
+```powershell
+echo "HUGGINGFACE_TOKEN=hf_your_token_here" | Out-File -FilePath .env -Encoding utf8
+```
 
-### 4) 実行方法
+---
 
-#### GUI アプリケーション（推奨）
+## 🚀 使用方法
+
+### GUI アプリケーション（推奨）
+
 ```bash
 uv run fwhisper-gui
 ```
 
-#### コマンドライン
+#### 基本的な操作手順
+1. **ファイル選択**: 「ファイル追加」または「フォルダ追加」で音声・動画ファイルを選択
+2. **設定調整**: 話者数、出力ディレクトリ、モデルサイズなどを設定
+3. **処理開始**: 「処理開始」ボタンをクリック
+4. **進捗確認**: リアルタイムで処理状況と経過時間を確認
+5. **結果確認**: 処理完了後、結果テーブルから出力ディレクトリにアクセス
+6. **CSV出力**: 必要に応じてCSV形式で結果をダウンロード
+
+#### 対応ファイル形式
+- **音声**: WAV, MP3, FLAC, M4A, AAC
+- **動画**: MP4, AVI, MOV, MKV, WMV
+
+### コマンドライン
+
 ```bash
 # 基本的な文字起こし
-uv run fwhisper-batch --config config.json
+uv run fwhisper-batch --config config.json --files audio.wav
 
 # 話者分離付き（.envにHUGGINGFACE_TOKENが必要）
-uv run fwhisper-batch --config config.json
+uv run fwhisper-batch --config config.json --files audio.wav
 
 # 話者分離を無効化
-uv run fwhisper-batch --config config.json --disable-diarization
+uv run fwhisper-batch --config config.json --files audio.wav --disable-diarization
+
+# 複数ファイルを一括処理
+uv run fwhisper-batch --config config.json --files audio1.wav audio2.mp3 audio3.mp4
 ```
 
 ---
@@ -216,14 +277,58 @@ uv run fwhisper-batch --config config.json [オプション]
 
 ## ⚠️ トラブルシューティング
 
-### 話者分離が動作しない
+### インストール関連
+
+#### 1. 依存関係のインストールエラー
+**症状**: `uv sync` でエラーが発生
+**解決策**:
+```bash
+# キャッシュをクリアして再インストール
+uv clean
+uv sync
+
+# Python バージョンを確認
+python --version  # 3.9以上が必要
+```
+
+#### 2. ffmpeg が見つからない
+**症状**: `ffmpeg not found` エラー
+**解決策**:
+```bash
+# インストール確認
+ffmpeg -version
+
+# Windows: PATH に追加されているか確認
+where ffmpeg
+
+# macOS/Linux: PATH に追加されているか確認
+which ffmpeg
+```
+
+### 話者分離関連
+
+#### 3. 話者分離が動作しない
 **症状**: 「完了 (話者分離スキップ)」と表示される
 **解決策**:
 1. `.env`ファイルに`HUGGINGFACE_TOKEN`が設定されているか確認
 2. `config.json`に`diarize_model`が設定されているか確認
 3. Hugging Face トークンが有効か確認
+4. pyannote/speaker-diarization モデルの利用規約に同意しているか確認
 
-### GPU が認識されない
+#### 4. Hugging Face トークンエラー
+**症状**: `Authentication failed` エラー
+**解決策**:
+```bash
+# トークンの確認
+cat .env
+
+# 正しい形式: HUGGINGFACE_TOKEN=hf_xxxxxxxxxx
+# hf_ で始まる必要があります
+```
+
+### GPU・パフォーマンス関連
+
+#### 5. GPU が認識されない
 **症状**: CPU処理になってしまう
 **解決策**:
 ```bash
@@ -231,24 +336,86 @@ uv run fwhisper-batch --config config.json [オプション]
 uv run python -c "import ctranslate2 as c; print('CUDA GPUs:', c.get_cuda_device_count())"
 ```
 - NVIDIA ドライバを最新版に更新
-- CUDA対応GPUか確認
+- CUDA対応GPUか確認（GTX 10シリーズ以降推奨）
 
-### メモリ不足エラー
-**症状**: CUDA out of memory
+#### 6. メモリ不足エラー
+**症状**: `CUDA out of memory` または `RuntimeError: out of memory`
 **解決策**:
-- モデルサイズを`large-v3`→`medium`に変更
+- モデルサイズを変更: `large-v3` → `medium` → `small`
 - `compute_type`を`int8`に変更
+- 他のアプリケーションを終了してメモリを確保
+
+#### 7. 処理が遅い
+**症状**: 処理時間が長すぎる
+**解決策**:
+- GPU使用を確認（上記GPU確認コマンド）
+- モデルサイズを小さくする
+- `beam_size`を小さくする（5 → 3 → 1）
+
+### アプリケーション関連
+
+#### 8. GUI が起動しない
+**症状**: `uv run fwhisper-gui` でエラー
+**解決策**:
+```bash
+# 詳細エラーを確認
+uv run fwhisper-gui --debug
+
+# 依存関係を再インストール
+uv sync --reinstall
+```
+
+#### 9. ファイルが読み込めない
+**症状**: 音声・動画ファイルが処理できない
+**解決策**:
+- ファイル形式を確認（WAV, MP3, MP4, M4A, FLAC対応）
+- ファイルパスに日本語や特殊文字が含まれていないか確認
+- ファイルが破損していないか確認
+
+#### 10. 設定が保存されない
+**症状**: アプリを再起動すると設定がリセットされる
+**解決策**:
+- アプリケーションに書き込み権限があるか確認
+- ウイルス対策ソフトがブロックしていないか確認
 
 ### その他のエラー
-- **`fwhisper-batch: not found`**  
-  → `uv sync` 前に実行していない/パッケージ化されていない可能性。  
-  → プロジェクト直下で `uv sync` を実行。
 
-- **`ModuleNotFoundError: No module named 'fwhisper_batch'`**  
-  → フォルダ構成が正しいか確認し、`uv clean && uv sync`を実行。
+#### 11. コマンドが見つからない
+**症状**: `fwhisper-batch: not found` または `fwhisper-gui: not found`
+**解決策**:
+```bash
+# プロジェクトディレクトリで実行しているか確認
+pwd
+ls pyproject.toml  # このファイルがあることを確認
 
-- **ffmpeg が見つからない/読み込み失敗**  
-  → OS へ ffmpeg をインストールし PATH を通す。
+# 依存関係を再インストール
+uv sync
+```
+
+#### 12. モジュールが見つからない
+**症状**: `ModuleNotFoundError: No module named 'fwhisper_batch'`
+**解決策**:
+```bash
+# フォルダ構成を確認
+ls src/fwhisper_batch/
+
+# 完全にクリーンインストール
+uv clean
+rm -rf .venv  # 仮想環境を削除
+uv sync
+```
+
+### ログの確認方法
+
+詳細なエラー情報を確認したい場合：
+
+```bash
+# GUIアプリケーションをデバッグモードで起動
+uv run fwhisper-gui --debug
+
+# コマンドラインで詳細ログを表示
+uv run fwhisper-batch --config config.json --files audio.wav --verbose
+```
 
 ## 📊 パフォーマンス目安
 

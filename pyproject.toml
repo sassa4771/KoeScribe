@@ -7,13 +7,12 @@ requires-python = ">=3.9"
 dependencies = [
   "faster-whisper>=1.0.1",
   "tqdm>=4.66.0",
-  "webrtcvad>=2.0.10",
-  "python-dotenv>=1.0.1", # ← 追加
-  "soundfile>=0.12.1", # diarize/mergeで使用
-  "numpy>=1.26", # diarize/mergeで使用
-  "pyannote.audio>=3.0.1", # diarize用（Torchは各自のCUDAに合わせて別途）
-  "PySide6>=6.5.0", # GUI framework
-  "pandas>=2.0.0", # CSV export
+  "python-dotenv>=1.0.1",
+  "soundfile>=0.12.1",
+  "numpy>=1.26",
+  "pyannote.audio>=3.0.1",
+  "PySide6>=6.5.0",
+  "pandas>=2.0.0",
 ]
 
 [project.scripts]
