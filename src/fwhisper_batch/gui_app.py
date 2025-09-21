@@ -772,11 +772,6 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(file_path)
             self.file_list.addItem(item)
             
-        if self.worker.isRunning():
-            preset = self.get_current_preset()
-            for file_path in files:
-                job = ProcessingJob(Path(file_path), preset)
-                self.worker.add_job(job)
                 
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "フォルダを選択")
@@ -784,18 +779,11 @@ class MainWindow(QMainWindow):
             folder_path = Path(folder)
             extensions = ['.wav']
             
-            new_files = []
             for ext in extensions:
                 for file_path in folder_path.glob(f"*{ext}"):
                     item = QListWidgetItem(str(file_path))
                     self.file_list.addItem(item)
-                    new_files.append(str(file_path))
                     
-            if self.worker.isRunning() and new_files:
-                preset = self.get_current_preset()
-                for file_path in new_files:
-                    job = ProcessingJob(Path(file_path), preset)
-                    self.worker.add_job(job)
                     
     def clear_files(self):
         self.file_list.clear()
@@ -955,6 +943,10 @@ class MainWindow(QMainWindow):
             self.progress_bar.setValue(100)
             self.stage_label.setText("完了")
             self.refresh_history()
+            
+            self.file_list.clear()
+            self.jobs.clear()
+            self.results_table.setRowCount(0)
             
     def job_failed(self, file_path: str, error: str):
         file_name = Path(file_path).name
