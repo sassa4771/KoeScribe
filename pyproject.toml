@@ -14,7 +14,6 @@ dependencies = [
   "pyannote.audio>=3.0.1", # diarize用（Torchは各自のCUDAに合わせて別途）
   "PySide6>=6.5.0", # GUI framework
   "pandas>=2.0.0", # CSV export
-  "pyinstaller>=6.16.0",
 ]
 
 [project.scripts]

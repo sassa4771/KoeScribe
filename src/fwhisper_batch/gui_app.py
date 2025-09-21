@@ -168,18 +168,20 @@ class TranscriptionWorker(QThread):
         
     def stop_processing(self):
         self.should_stop = True
+        self.jobs.put(None)
         
     def run(self):
         while not self.should_stop:
             try:
-                job = self.jobs.get(timeout=1.0)
+                job = self.jobs.get(block=True, timeout=None)
+                if job is None:
+                    break
                 self.current_job = job
                 self.process_job(job)
                 self.jobs.task_done()
                 self.queue_updated.emit(self.jobs.qsize())
-            except queue.Empty:
-                if self.jobs.empty():
-                    break
+            except Exception as e:
+                print(f"Error in worker thread: {e}")
                 continue
         
         self.current_job = None
