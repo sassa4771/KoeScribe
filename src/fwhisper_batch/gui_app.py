@@ -369,6 +369,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("FWhisper Batch GUI v2 - 音声文字起こし & 話者分離")
         self.setGeometry(100, 100, 1400, 900)
         
+        icon_path = Path(__file__).parent.parent.parent / "app_icon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+        
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
