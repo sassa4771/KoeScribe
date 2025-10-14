@@ -93,7 +93,7 @@ echo "HUGGINGFACE_TOKEN=hf_your_token_here" | Out-File -FilePath .env -Encoding 
 ### GUI アプリケーション（推奨）
 
 ```bash
-uv run fwhisper-gui
+uv run koescribe-gui
 ```
 
 #### 基本的な操作手順
@@ -111,13 +111,13 @@ uv run fwhisper-gui
 
 ```bash
 # 基本的な文字起こし
-uv run fwhisper-batch --config config.json --files audio.wav
+uv run koescribe-batch --config config.json --files audio.wav
 
 # 話者分離付き（.envにHUGGINGFACE_TOKENが必要）
-uv run fwhisper-batch --config config.json --files audio.wav
+uv run koescribe-batch --config config.json --files audio.wav
 
 # 話者分離を無効化
-uv run fwhisper-batch --config config.json --files audio.wav --disable-diarization
+uv run koescribe-batch --config config.json --files audio.wav --disable-diarization
 
 ```
 
@@ -179,7 +179,7 @@ uv run fwhisper-batch --config config.json --files audio.wav --disable-diarizati
 - 既定（`"compute_type": "auto"`）では **`cuda` 時は `int8_float16`、`cpu` 時は `int8`** を自動選択します。
 - 起動時に次のようなログが出ます：
   ```text
-  [fwhisper] model=large-v3 device=cuda compute_type=int8_float16
+  [koescribe] model=large-v3 device=cuda compute_type=int8_float16
   ```
   `device=cuda` なら **GPU 使用中**、`device=cpu` なら **CPU 使用中** です。
 
@@ -194,7 +194,7 @@ uv run fwhisper-batch --config config.json --files audio.wav --disable-diarizati
     ```powershell
     $env:FWHISPER_DEVICE="cuda"
     $env:FWHISPER_COMPUTE="int8_float16"
-    uv run fwhisper-batch
+    uv run koescribe-batch
     ```
 
 ### 動作確認ワンライナー
@@ -207,7 +207,7 @@ uv run python -c "import ctranslate2 as c; print('CUDA GPUs:', c.get_cuda_device
 
 ## 🧰 CLI オプション
 ```bash
-uv run fwhisper-batch --config config.json [オプション]
+uv run koescribe-batch --config config.json [オプション]
 ```
 
 | オプション | 説明 | デフォルト |
@@ -317,11 +317,11 @@ uv run python -c "import ctranslate2 as c; print('CUDA GPUs:', c.get_cuda_device
 ### アプリケーション関連
 
 #### 8. GUI が起動しない
-**症状**: `uv run fwhisper-gui` でエラー
+**症状**: `uv run koescribe-gui` でエラー
 **解決策**:
 ```bash
 # 詳細エラーを確認
-uv run fwhisper-gui --debug
+uv run koescribe-gui --debug
 
 # 依存関係を再インストール
 uv sync --reinstall
@@ -343,7 +343,7 @@ uv sync --reinstall
 ### その他のエラー
 
 #### 11. コマンドが見つからない
-**症状**: `fwhisper-batch: not found` または `fwhisper-gui: not found`
+**症状**: `koescribe-batch: not found` または `koescribe-gui: not found`
 **解決策**:
 ```bash
 # プロジェクトディレクトリで実行しているか確認
@@ -373,10 +373,10 @@ uv sync
 
 ```bash
 # GUIアプリケーションをデバッグモードで起動
-uv run fwhisper-gui --debug
+uv run koescribe-gui --debug
 
 # コマンドラインで詳細ログを表示
-uv run fwhisper-batch --config config.json --files audio.wav --verbose
+uv run koescribe-batch --config config.json --files audio.wav --verbose
 ```
 
 ## 📊 パフォーマンス目安

@@ -334,7 +334,7 @@ def main():
     else:
         print("[info] Speaker diarization disabled")
 
-    print(f"[fwhisper] model={model_size} device={device} compute_type={compute_type}")
+    print(f"[koescribe] model={model_size} device={device} compute_type={compute_type}")
     model = WhisperModel(model_size, device=device, compute_type=compute_type)
 
     inputs = [root_dir / f for f in files]

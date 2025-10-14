@@ -1,5 +1,5 @@
 [project]
-name = "fwhisper-batch"
+name = "koescribe-batch"
 version = "0.1.0"
 description = "Batch transcription with Faster-Whisper using uv"
 readme = "README.md"
@@ -16,8 +16,8 @@ dependencies = [
 ]
 
 [project.scripts]
-fwhisper-batch = "fwhisper_batch.transcribe_batch:main"
-fwhisper-gui = "fwhisper_batch.gui_app:main"
+koescribe-batch = "fwhisper_batch.transcribe_batch:main"
+koescribe-gui = "fwhisper_batch.gui_app:main"
 diarize-pyannote = "tools.diarize:main"
 merge-speakers   = "tools.merge_speakers:main"
 asr-diarize-merge = "tools.pipeline_all:main"
