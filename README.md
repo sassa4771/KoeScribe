@@ -229,21 +229,20 @@ uv run koescribe-batch --config config.json [オプション]
 ## 📂 出力ファイル
 
 ### 基本出力（文字起こしのみ）
-- `<basename>_segments.jsonl`：セグメント情報（時間・テキスト）
-- `<basename>_words.jsonl`：単語レベル情報
+- `<basename>_segments.csv`：セグメント情報（時間・テキスト）
+- `<basename>_words.csv`：単語レベル情報
 - `<basename>_processing_time.txt`：処理統計情報
 
 ### 話者分離付き出力
-- `<basename>_segments_with_speakers.jsonl`：話者情報付きセグメント
-- `<basename>_words_with_speakers.jsonl`：話者情報付き単語
-- `<basename>_segments_with_speakers.csv`：CSV形式（GUI自動生成）
-- `<basename>_words_with_speakers.csv`：CSV形式（GUI自動生成）
+- `<basename>_segments_with_speakers.csv`：話者情報付きセグメント
+- `<basename>_words_with_speakers.csv`：話者情報付き単語
 
-### 出力例
-```json
-{"start": 0.0, "end": 3.2, "text": "おはようございます", "speaker": "SPEAKER_00"}
-{"start": 3.5, "end": 6.8, "text": "今日の議題について", "speaker": "SPEAKER_00"}
-{"start": 7.0, "end": 9.1, "text": "質問があります", "speaker": "SPEAKER_01"}
+### 出力例（CSV形式）
+```csv
+start,end,text,speaker
+0.0,3.2,おはようございます,SPEAKER_00
+3.5,6.8,今日の議題について,SPEAKER_00
+7.0,9.1,質問があります,SPEAKER_01
 ```
 
 ---

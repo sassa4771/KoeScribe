@@ -4,17 +4,18 @@ from dotenv import load_dotenv
 
 from faster_whisper import WhisperModel
 import ctranslate2
+import pandas as pd
 
 # 既存ライブラリ関数を利用
 from fwhisper_batch.transcribe_batch import resolve_device, resolve_compute_type
 from tools.diarize import diarize_one
 from tools.merge_speakers import assign_speakers_to_words, to_runs
 
-def write_jsonl(path: Path, rows):
+def write_csv(path: Path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    if rows:
+        df = pd.DataFrame(rows)
+        df.to_csv(path, index=False, encoding='utf-8-sig')
 
 def asr_words(model: WhisperModel, audio_path: Path, language: str, beam_size: int):
     segs, info = model.transcribe(
@@ -62,17 +63,18 @@ def main():
         # 1) ASR (words)
         t0=time.time()
         words = asr_words(model, apath, args.language, args.beam_size)
-        write_jsonl(out_dir / f"{apath.stem}_words.jsonl", words)
+        write_csv(out_dir / f"{apath.stem}_words.csv", words)
         print(f"[asr] words: {len(words)}")
 
         # 2) Diarize
-        spans_path = out_dir / "spans.jsonl"
+        spans_path = out_dir / "spans.csv"
         diarize_one(apath, spans_path, args.diarize_model, token, args.min_dur, args.bridge_gap)
-        spans = [json.loads(line) for line in spans_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        df = pd.read_csv(spans_path, encoding='utf-8-sig')
+        spans = df.to_dict('records')
 
         # 3) Merge
         labeled = assign_speakers_to_words(words, spans, smooth_min_sec=0.6)
-        write_jsonl(out_dir / f"{apath.stem}_merged.jsonl", labeled)
+        write_csv(out_dir / f"{apath.stem}_merged.csv", labeled)
         runs = to_runs(labeled)
         with (out_dir / f"{apath.stem}_transcription.txt").open("w", encoding="utf-8") as f:
             for r in runs:

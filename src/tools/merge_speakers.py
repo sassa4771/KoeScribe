@@ -2,21 +2,17 @@
 import json, argparse
 from pathlib import Path
 from typing import List, Dict, Any
+import pandas as pd
 
-def load_jsonl(p: Path) -> List[Dict[str, Any]]:
-    rows=[]
-    with p.open("r", encoding="utf-8") as f:
-        for line in f:
-            line=line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
+def load_csv(p: Path) -> List[Dict[str, Any]]:
+    df = pd.read_csv(p, encoding='utf-8-sig')
+    return df.to_dict('records')
 
-def save_jsonl(p: Path, rows: List[Dict[str, Any]]):
+def save_csv(p: Path, rows: List[Dict[str, Any]]):
     p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    if rows:
+        df = pd.DataFrame(rows)
+        df.to_csv(p, index=False, encoding='utf-8-sig')
 
 def overlap(a0: float, a1: float, b0: float, b1: float) -> float:
     """[a0,a1] と [b0,b1] の重なり長さ（秒）"""
@@ -128,10 +124,10 @@ def to_runs(labeled_words: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return runs
 
 def main():
-    ap = argparse.ArgumentParser(description="Assign speaker labels to segments.jsonl using spans.jsonl")
-    ap.add_argument("--segments", required=True, help="*_segments.jsonl (ASR 出力)")
-    ap.add_argument("--spans",    required=True, help="spans.jsonl (pyannote 出力)")
-    ap.add_argument("--out",      required=True, help="出力: segments に speaker を付けた JSONL")
+    ap = argparse.ArgumentParser(description="Assign speaker labels to segments.csv using spans.csv")
+    ap.add_argument("--segments", required=True, help="*_segments.csv (ASR 出力)")
+    ap.add_argument("--spans",    required=True, help="spans.csv (pyannote 出力)")
+    ap.add_argument("--out",      required=True, help="出力: segments に speaker を付けた CSV")
     ap.add_argument("--txt",      help="話者ラベル付き transcription.txt を出力（任意）")
     ap.add_argument("--min-overlap-ratio", type=float, default=0.5,
                     help="重なり採用の最低割合（セグメント長に対する比率, 既定=0.5）")
@@ -139,15 +135,15 @@ def main():
                     help="完全包含の優先を無効化（最大重なりのみで決定）")
     args = ap.parse_args()
 
-    segs  = load_jsonl(Path(args.segments))
-    spans = load_jsonl(Path(args.spans))
+    segs  = load_csv(Path(args.segments))
+    spans = load_csv(Path(args.spans))
 
     labeled = assign_speaker_to_segments(
         segs, spans,
         min_overlap_ratio=args.min_overlap_ratio,
         prefer_containment=(not args.no_containment_priority),
     )
-    save_jsonl(Path(args.out), labeled)
+    save_csv(Path(args.out), labeled)
 
     if args.txt:
         write_txt_grouped(Path(args.txt), labeled)
