@@ -1,4 +1,4 @@
-# FWhisper-Batch — 音声文字起こし・話者分離 GUI アプリケーション
+# 音声文字起こし・話者分離 GUI アプリケーション
 
 Faster-Whisper と pyannote.audio を使用した、高精度な音声文字起こしと話者分離を行うデスクトップアプリケーションです。  
 **Windows / macOS / Linux** 対応、直感的なGUIで複数ファイルの一括処理が可能です。
@@ -9,7 +9,6 @@ Faster-Whisper と pyannote.audio を使用した、高精度な音声文字起�
 
 - 🎯 **高精度文字起こし**: Faster-Whisper による高速・高精度な音声認識
 - 👥 **話者分離**: 誰がいつ話したかを自動識別（pyannote.audio）
-- 🖥️ **直感的GUI**: ドラッグ&ドロップ対応の使いやすいインターフェース
 - 📊 **リアルタイム進捗**: 処理状況と経過時間をリアルタイム表示
 - 🔄 **キュー処理**: 複数ファイルの連続処理に対応
 - 📈 **CSV出力**: 結果をCSV形式でダウンロード可能
@@ -24,7 +23,6 @@ Faster-Whisper と pyannote.audio を使用した、高精度な音声文字起�
 - **OS**: Windows 10/11, macOS 10.15+, Ubuntu 18.04+
 - **メモリ**: 8GB以上推奨（4GBでも動作可能）
 - **GPU**: NVIDIA GPU推奨（CPUでも動作）
-- **ffmpeg**: 音声・動画ファイル処理に必要
 
 ---
 
@@ -37,8 +35,6 @@ Faster-Whisper と pyannote.audio を使用した、高精度な音声文字起�
 # uvをインストール
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-# ffmpegをインストール
-winget install Gyan.FFmpeg
 ```
 
 #### macOS
@@ -46,8 +42,6 @@ winget install Gyan.FFmpeg
 # uvをインストール
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# ffmpegをインストール
-brew install ffmpeg
 ```
 
 #### Linux (Ubuntu/Debian)
@@ -55,8 +49,6 @@ brew install ffmpeg
 # uvをインストール
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# ffmpegをインストール
-sudo apt update && sudo apt install -y ffmpeg
 ```
 
 ### 2. プロジェクトのセットアップ
@@ -85,7 +77,7 @@ uv sync
 プロジェクトルートに `.env` ファイルを作成：
 
 ```bash
-# .envファイルを作成
+# .envファイルを作成（hf_your_token_hereに自分のトークンを設定）
 echo "HUGGINGFACE_TOKEN=hf_your_token_here" > .env
 ```
 
@@ -113,8 +105,7 @@ uv run fwhisper-gui
 6. **CSV出力**: 必要に応じてCSV形式で結果をダウンロード
 
 #### 対応ファイル形式
-- **音声**: WAV, MP3, FLAC, M4A, AAC
-- **動画**: MP4, AVI, MOV, MKV, WMV
+- **音声**: WAV
 
 ### コマンドライン
 
@@ -128,8 +119,6 @@ uv run fwhisper-batch --config config.json --files audio.wav
 # 話者分離を無効化
 uv run fwhisper-batch --config config.json --files audio.wav --disable-diarization
 
-# 複数ファイルを一括処理
-uv run fwhisper-batch --config config.json --files audio1.wav audio2.mp3 audio3.mp4
 ```
 
 ---
@@ -137,7 +126,6 @@ uv run fwhisper-batch --config config.json --files audio1.wav audio2.mp3 audio3.
 ## 🖥️ GUI アプリケーション
 
 ### 主な機能
-- **WAVファイル選択**：ドラッグ&ドロップまたはファイル選択
 - **動的キュー管理**：処理中でもファイル追加可能
 - **設定プリセット**：よく使う設定を保存・読み込み
 - **リアルタイム進捗**：処理状況をリアルタイム表示
@@ -153,24 +141,12 @@ uv run fwhisper-batch --config config.json --files audio1.wav audio2.mp3 audio3.
 
 ---
 
-## 📱 実行ファイル版（ビルド済み）
-
-### ビルド済み実行ファイルの使用
-開発環境なしで使用したい場合は、ビルド済み実行ファイルを提供可能です。
-
-**GPU設定について：**
-- ビルド済み実行ファイルでも自動的にGPU検出
-- NVIDIA GPU + 最新ドライバがあれば自動でGPU使用
-- CUDA Toolkit等の追加インストール不要
-
-
----
 
 ## ⚙️ `config.json` の例
 ```json
 {
   "root_dir": "./samples",
-  "audio_files": ["sample1.wav", "sample2.mp3"],
+  "audio_files": ["sample1.wav", "sample2.wav"],
   "output_dir": "./outputs",
   "model_size": "large-v3",
   "device": "auto",
@@ -291,23 +267,9 @@ uv sync
 python --version  # 3.9以上が必要
 ```
 
-#### 2. ffmpeg が見つからない
-**症状**: `ffmpeg not found` エラー
-**解決策**:
-```bash
-# インストール確認
-ffmpeg -version
-
-# Windows: PATH に追加されているか確認
-where ffmpeg
-
-# macOS/Linux: PATH に追加されているか確認
-which ffmpeg
-```
-
 ### 話者分離関連
 
-#### 3. 話者分離が動作しない
+#### 2. 話者分離が動作しない
 **症状**: 「完了 (話者分離スキップ)」と表示される
 **解決策**:
 1. `.env`ファイルに`HUGGINGFACE_TOKEN`が設定されているか確認
@@ -315,7 +277,7 @@ which ffmpeg
 3. Hugging Face トークンが有効か確認
 4. pyannote/speaker-diarization モデルの利用規約に同意しているか確認
 
-#### 4. Hugging Face トークンエラー
+#### 3. Hugging Face トークンエラー
 **症状**: `Authentication failed` エラー
 **解決策**:
 ```bash
@@ -368,7 +330,7 @@ uv sync --reinstall
 #### 9. ファイルが読み込めない
 **症状**: 音声・動画ファイルが処理できない
 **解決策**:
-- ファイル形式を確認（WAV, MP3, MP4, M4A, FLAC対応）
+- ファイル形式を確認（WAVのみ対応）
 - ファイルパスに日本語や特殊文字が含まれていないか確認
 - ファイルが破損していないか確認
 
@@ -447,14 +409,7 @@ uv run python -c "import ctranslate2 as c; print('CUDA GPUs:', c.get_cuda_device
 ```
 `CUDA GPUs: 1` 以上が表示されれば、`device=auto` で **GPU (cuda)** が選ばれます。
 
-> NOTE: CTranslate2 の pip ホイールは必要な CUDA/cuDNN ランタイムを同梱しています。OS 側に CUDA Toolkit を入れていなくても動作します。
+> NOTE: CTranslate2 の pip ホイールは必要な CUDA/cuDNN ランタイムを同梱しています。OS 側に CUDA Toolkit を入れ
 
 ---
-
-## 🔒 ライセンス
-用途に応じて付与してください（例：MIT）。Faster-Whisper/CTranslate2 のライセンス準拠にご注意ください。
-
----
-
-**fwhisper-batch** - 効率的な音声文字起こし・話者分離統合システム
 
