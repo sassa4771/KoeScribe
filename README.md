@@ -1,4 +1,4 @@
-# 音声文字起こし・話者分離 GUI アプリケーション
+# KoeScribe-音声文字起こし・話者分離 GUI アプリケーション
 
 Faster-Whisper と pyannote.audio を使用した、高精度な音声文字起こしと話者分離を行うデスクトップアプリケーションです。  
 **Windows / macOS / Linux** 対応、直感的なGUIで複数ファイルの一括処理が可能です。
