@@ -10,6 +10,7 @@ from faster_whisper import WhisperModel
 import ctranslate2
 from tqdm import tqdm
 from dotenv import load_dotenv
+import pandas as pd
 
 
 def detect_device() -> str:
@@ -44,11 +45,11 @@ def load_config(path: Path) -> Dict[str, Any]:
         return json.load(f)
 
 
-def write_jsonl(path: Path, rows: List[Dict[str, Any]]):
+def write_csv(path: Path, rows: List[Dict[str, Any]]):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    if rows:
+        df = pd.DataFrame(rows)
+        df.to_csv(path, index=False, encoding='utf-8-sig')
 
 
 def is_diarization_enabled(cfg: Dict[str, Any]) -> bool:
@@ -67,7 +68,7 @@ def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], word
             print(f"[warning] HUGGINGFACE_TOKEN not set, skipping diarization for {audio_path.name}")
             return None
             
-        spans_path = out_dir / "spans.jsonl"
+        spans_path = out_dir / "spans.csv"
         diarize_model = cfg.get("diarize_model", "pyannote/speaker-diarization")
         min_dur = float(cfg.get("diarize_min_dur", 0.8))
         bridge_gap = float(cfg.get("diarize_bridge_gap", 0.3))
@@ -76,17 +77,14 @@ def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], word
         
         spans = []
         if spans_path.exists():
-            with spans_path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        spans.append(json.loads(line))
+            df = pd.read_csv(spans_path, encoding='utf-8-sig')
+            spans = df.to_dict('records')
         
         labeled_words = assign_speakers_to_words(words, spans, smooth_min_sec=0.6)
-        write_jsonl(out_dir / f"{audio_path.stem}_words_with_speakers.jsonl", labeled_words)
+        write_csv(out_dir / f"{audio_path.stem}_words_with_speakers.csv", labeled_words)
         
         labeled_segments = assign_speakers_to_words(segments, spans, smooth_min_sec=0.6)
-        write_jsonl(out_dir / f"{audio_path.stem}_segments_with_speakers.jsonl", labeled_segments)
+        write_csv(out_dir / f"{audio_path.stem}_segments_with_speakers.csv", labeled_segments)
         
         return {
             "words_with_speakers": len(labeled_words),
@@ -116,11 +114,11 @@ def transcribe_one(
 ) -> Dict[str, Any]:
     """
     1ファイルを文字起こしして出力一式を保存する。
-    - JSONL: <stem>_segments.jsonl
-    - JSONL: <stem>_words.jsonl（word_timestamps=True の時だけ）
+    - CSV: <stem>_segments.csv
+    - CSV: <stem>_words.csv（word_timestamps=True の時だけ）
     - TXT: <stem>_processing_time.txt
-    - JSONL: <stem>_words_with_speakers.jsonl（enable_diarization=True の時だけ）
-    - JSONL: <stem>_segments_with_speakers.jsonl（enable_diarization=True の時だけ）
+    - CSV: <stem>_words_with_speakers.csv（enable_diarization=True の時だけ）
+    - CSV: <stem>_segments_with_speakers.csv（enable_diarization=True の時だけ）
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -176,9 +174,9 @@ def transcribe_one(
     proc_time = end - start
 
     # 保存
-    write_jsonl(out_dir / f"{audio_path.stem}_segments.jsonl", rows_segments)
+    write_csv(out_dir / f"{audio_path.stem}_segments.csv", rows_segments)
     if word_timestamps and rows_words:
-        write_jsonl(out_dir / f"{audio_path.stem}_words.jsonl", rows_words)
+        write_csv(out_dir / f"{audio_path.stem}_words.csv", rows_words)
 
     stats = [
         f"処理時間: {proc_time:.2f} 秒",
@@ -278,9 +276,9 @@ def transcribe_one_with_callback(
     end = time.time()
     proc_time = end - start
 
-    write_jsonl(out_dir / f"{audio_path.stem}_segments.jsonl", rows_segments)
+    write_csv(out_dir / f"{audio_path.stem}_segments.csv", rows_segments)
     if word_timestamps and rows_words:
-        write_jsonl(out_dir / f"{audio_path.stem}_words.jsonl", rows_words)
+        write_csv(out_dir / f"{audio_path.stem}_words.csv", rows_words)
 
     stats = [
         f"処理時間: {proc_time:.2f} 秒",
@@ -307,7 +305,7 @@ def main():
     parser.add_argument("--root", type=str, help="Override root_dir")
     parser.add_argument("--out", type=str, help="Override output_dir")
     parser.add_argument("--files", nargs="*", help="Override audio files list")
-    parser.add_argument("--word-timestamps", action="store_true", help="Export per-word timestamps (also writes *_words.jsonl)")
+    parser.add_argument("--word-timestamps", action="store_true", help="Export per-word timestamps (also writes *_words.csv)")
     parser.add_argument("--no-progress", action="store_true", help="Disable per-file progress bar")
     parser.add_argument("--disable-diarization", action="store_true", help="Disable speaker diarization even if configured")
     args = parser.parse_args()
@@ -364,7 +362,7 @@ def main():
         print(f"\n=== {idx}/{len(inputs)} Done: {p.name} ===")
         print(preview + ("..." if len(result["text"]) > len(preview) else ""))
         if use_word_timestamps:
-            print(f"words.jsonl: {result['words_count']} words")
+            print(f"words.csv: {result['words_count']} words")
         if enable_diarization and result.get("diarization"):
             diar_info = result["diarization"]
             print(f"diarization: {diar_info['words_with_speakers']} words, {diar_info['segments_with_speakers']} segments with speakers")

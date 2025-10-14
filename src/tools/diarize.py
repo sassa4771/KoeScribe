@@ -4,16 +4,17 @@ from pathlib import Path
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 from tqdm import tqdm
+import pandas as pd
 
 def load_config(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
-def save_jsonl(path: Path, rows: List[Dict[str, Any]]):
+def save_csv(path: Path, rows: List[Dict[str, Any]]):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    if rows:
+        df = pd.DataFrame(rows)
+        df.to_csv(path, index=False, encoding='utf-8-sig')
 
 def postprocess_segments(rows, min_dur=0.8, bridge_gap=0.3):
     """短区間の吸収＆短隙間ブリッジで安定化。"""
@@ -48,12 +49,12 @@ def diarize_one(audio_path: Path, out_path: Path, model_id: str, token: str,
     rows = [{"start": float(turn.start), "end": float(turn.end), "speaker": str(spk)}
             for turn, _, spk in diar.itertracks(yield_label=True)]
     rows = postprocess_segments(rows, min_dur=min_dur, bridge_gap=bridge_gap)
-    save_jsonl(out_path, rows)
+    save_csv(out_path, rows)
     return out_path
 
 def main():
     load_dotenv()  # .env を読み込む（HUGGINGFACE_TOKEN など）
-    ap = argparse.ArgumentParser(description="Speaker diarization (pyannote) → spans.jsonl")
+    ap = argparse.ArgumentParser(description="Speaker diarization (pyannote) → spans.csv")
     ap.add_argument("--config", type=str, default="config.json", help="設定ファイル（root/files/out など）")
     ap.add_argument("--root", type=str, help="config の root_dir を上書き")
     ap.add_argument("--out", type=str, help="config の output_dir を上書き")
@@ -92,7 +93,7 @@ def main():
         raise SystemExit("音声ファイルが見つかりません:\n- " + "\n- ".join(missing))
 
     for p in tqdm(inputs, desc="🗣️ Diarizing", unit="file"):
-        spans_path = out_dir / f"output_{p.stem}" / "spans.jsonl"
+        spans_path = out_dir / f"output_{p.stem}" / "spans.csv"
         wrote = diarize_one(p, spans_path, diar_model, token, min_dur, bridge_gap)
         print(f"[diarize] wrote: {wrote}")
 
