@@ -205,6 +205,101 @@ def transcribe_one(
     return result
 
 
+def transcribe_one_with_callback(
+    model: WhisperModel,
+    audio_path: Path,
+    out_dir: Path,
+    language: str,
+    beam_size: int,
+    use_vad: bool,
+    min_silence_ms: int,
+    word_timestamps: bool,
+    show_progress: bool = True,
+    progress_callback=None,
+) -> Dict[str, Any]:
+    """
+    Transcribe one file with progress callback support for GUI integration
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    start = time.time()
+    segments, info = model.transcribe(
+        str(audio_path),
+        language=language if language else None,
+        beam_size=beam_size,
+        vad_filter=use_vad,
+        vad_parameters={"min_silence_duration_ms": min_silence_ms} if use_vad else None,
+        word_timestamps=word_timestamps,
+    )
+
+    rows_segments: List[Dict[str, Any]] = []
+    rows_words: List[Dict[str, Any]] = []
+    text_parts: List[str] = []
+    dur = float(getattr(info, "duration", 0.0) or 0.0)
+    last_end = 0.0
+
+    pbar = None
+    if show_progress and dur > 0:
+        pbar = tqdm(
+            total=dur,
+            unit="s",
+            desc=audio_path.name,
+            leave=False,
+            bar_format="{l_bar}{bar}| {n:.0f}/{total:.0f}s",
+        )
+
+    for s in segments:
+        seg_obj: Dict[str, Any] = {"start": s.start, "end": s.end, "text": s.text}
+        text_parts.append(s.text)
+        
+        if word_timestamps and getattr(s, "words", None):
+            for w in s.words:
+                rows_words.append({"start": w.start, "end": w.end, "word": w.word})
+        rows_segments.append(seg_obj)
+
+        if dur > 0:
+            progress_percent = min(100.0, (float(s.end) / dur) * 100.0)
+            if progress_callback:
+                progress_callback(progress_percent)
+                
+        if pbar is not None:
+            inc = max(0.0, float(s.end) - last_end)
+            if inc > 0:
+                pbar.update(inc)
+                last_end = float(s.end)
+
+    if pbar is not None:
+        pbar.close()
+        
+    if progress_callback:
+        progress_callback(100.0)
+
+    text = "".join(text_parts)
+    end = time.time()
+    proc_time = end - start
+
+    write_jsonl(out_dir / f"{audio_path.stem}_segments.jsonl", rows_segments)
+    if word_timestamps and rows_words:
+        write_jsonl(out_dir / f"{audio_path.stem}_words.jsonl", rows_words)
+
+    stats = [
+        f"処理時間: {proc_time:.2f} 秒",
+        f"推定言語: {getattr(info, 'language', '')}",
+        f"音声長: {getattr(info, 'duration', 0.0):.2f} 秒",
+        f"単語タイムスタンプ: {'あり' if (word_timestamps and rows_words) else 'なし'}",
+        f"VAD: {'ON' if use_vad else 'OFF'} (min_silence_ms={min_silence_ms if use_vad else 'N/A'})",
+    ]
+    (out_dir / f"{audio_path.stem}_processing_time.txt").write_text("\n".join(stats) + "\n", encoding="utf-8")
+
+    return {
+        "text": text,
+        "processing_time": proc_time,
+        "language": getattr(info, "language", None),
+        "duration": getattr(info, "duration", None),
+        "words_count": len(rows_words),
+    }
+
+
 def main():
     load_dotenv()  # Load .env file for HUGGINGFACE_TOKEN
     parser = argparse.ArgumentParser(description="Batch transcription with Faster-Whisper (uv)")

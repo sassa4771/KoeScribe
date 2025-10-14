@@ -11,6 +11,7 @@ uv.lock
 build/
 dist/
 *.egg-info/
+*.spec
 
 # Outputs
 outputs/
@@ -19,3 +20,4 @@ outputs/
 *.egg-info/
 dist/
 build/
+*.spec
