@@ -77,7 +77,7 @@ uv sync
 プロジェクトルートに `.env` ファイルを作成：
 
 ```bash
-# .envファイルを作成（hf_your_token_hereに自分のトークンを設定）
+# .envファイルを作成
 echo "HUGGINGFACE_TOKEN=hf_your_token_here" > .env
 ```
 
@@ -85,6 +85,10 @@ echo "HUGGINGFACE_TOKEN=hf_your_token_here" > .env
 ```powershell
 echo "HUGGINGFACE_TOKEN=hf_your_token_here" | Out-File -FilePath .env -Encoding utf8
 ```
+
+> [!IMPORTANT]
+> .envファイルを作成して、
+> hf_your_token_hereに自分のトークンを設定してください。
 
 ---
 
