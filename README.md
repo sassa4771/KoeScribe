@@ -23,6 +23,7 @@ Faster-Whisper と pyannote.audio を使用した、高精度な音声文字起�
 - **OS**: Windows 10/11, macOS 10.15+, Ubuntu 18.04+
 - **メモリ**: 8GB以上推奨（4GBでも動作可能）
 - **GPU**: NVIDIA GPU推奨（CPUでも動作）
+- **FFmpeg**: 動画変換機能を使用する場合は必須（オプション）
 
 ---
 
@@ -35,6 +36,10 @@ Faster-Whisper と pyannote.audio を使用した、高精度な音声文字起�
 # uvをインストール
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
+# FFmpegをインストール（動画変換機能を使用する場合）
+# https://ffmpeg.org/download.html からダウンロードしてPATHに追加
+# または Chocolatey を使用:
+# choco install ffmpeg
 ```
 
 #### macOS
@@ -42,6 +47,8 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 # uvをインストール
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# FFmpegをインストール（動画変換機能を使用する場合）
+brew install ffmpeg
 ```
 
 #### Linux (Ubuntu/Debian)
@@ -49,6 +56,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # uvをインストール
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# FFmpegをインストール（動画変換機能を使用する場合）
+sudo apt update
+sudo apt install ffmpeg
 ```
 
 ### 2. プロジェクトのセットアップ
@@ -109,7 +119,10 @@ uv run koescribe-gui
 6. **CSV出力**: 必要に応じてCSV形式で結果をダウンロード
 
 #### 対応ファイル形式
-- **音声**: WAV
+- **音声**: WAV, MP3, M4A, FLAC, OGG, AAC
+- **動画**: MP4, MKV, AVI, MOV, FLV, WMV, WebM, M4V, MPG, MPEG
+
+**注意**: 動画・音声ファイルは自動的にWAVに変換されます（FFmpegが必要）
 
 ### コマンドライン
 

@@ -28,6 +28,7 @@ from fwhisper_batch.transcribe_batch import (
     transcribe_one, transcribe_one_with_callback, load_config, resolve_device, resolve_compute_type,
     detect_device, is_diarization_enabled, diarize_and_merge
 )
+from fwhisper_batch.video_converter import VideoConverter
 
 
 HELP_TOOLTIPS = {
@@ -192,6 +193,22 @@ class TranscriptionWorker(QThread):
             import time
             job_start_time = time.time()
             
+            audio_file = job.file_path
+            was_converted = False
+            temp_audio_dir = None
+            
+            if job.file_path.suffix.lower() != '.wav':
+                self.progress_updated.emit(str(job.file_path), 0.0, "動画変換中...")
+                self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "動画変換中")
+                
+                try:
+                    temp_audio_dir = Path(job.settings_preset.output_dir) / "converted_audio"
+                    audio_file, was_converted = VideoConverter.prepare_file_for_transcription(
+                        job.file_path, temp_audio_dir
+                    )
+                except Exception as e:
+                    raise Exception(f"動画変換エラー: {str(e)}")
+            
             self.progress_updated.emit(str(job.file_path), 0.0, "モデル読み込み中...")
             self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "モデル読み込み中")
             
@@ -213,7 +230,7 @@ class TranscriptionWorker(QThread):
                 self.phase_progress_updated.emit(str(job.file_path), 0, progress, "文字起こし中")
             
             result = self._transcribe_with_progress(
-                job, output_dir, transcription_progress_callback
+                job, audio_file, output_dir, transcription_progress_callback
             )
             
             self.phase_progress_updated.emit(str(job.file_path), 0, 100.0, "文字起こし完了")
@@ -221,7 +238,7 @@ class TranscriptionWorker(QThread):
             if job.settings_preset.enable_diarization:
                 self.phase_progress_updated.emit(str(job.file_path), 1, 0.0, "話者分離開始")
                 
-                diarization_result = self._perform_diarization(job, output_dir, result)
+                diarization_result = self._perform_diarization(job, audio_file, output_dir, result)
                 if diarization_result:
                     result["diarization"] = diarization_result
                     self.phase_progress_updated.emit(str(job.file_path), 1, 100.0, "話者分離完了")
@@ -252,11 +269,11 @@ class TranscriptionWorker(QThread):
             job.job_id = self.results_db.save_result(job)
             self.job_failed.emit(str(job.file_path), str(e))
             
-    def _transcribe_with_progress(self, job: ProcessingJob, output_dir: Path, progress_callback):
+    def _transcribe_with_progress(self, job: ProcessingJob, audio_file: Path, output_dir: Path, progress_callback):
         """Perform transcription with progress callback"""
         return transcribe_one_with_callback(
             self.model,
-            job.file_path,
+            audio_file,
             output_dir,
             job.settings_preset.language,
             job.settings_preset.beam_size,
@@ -267,7 +284,7 @@ class TranscriptionWorker(QThread):
             progress_callback=progress_callback
         )
     
-    def _perform_diarization(self, job: ProcessingJob, output_dir: Path, transcription_result: Dict[str, Any]):
+    def _perform_diarization(self, job: ProcessingJob, audio_file: Path, output_dir: Path, transcription_result: Dict[str, Any]):
         """Perform speaker diarization with detailed progress tracking"""
         if not job.settings_preset.enable_diarization:
             return None
@@ -298,7 +315,7 @@ class TranscriptionWorker(QThread):
             
             self.phase_progress_updated.emit(str(job.file_path), 1, 80.0, "話者クラスタリング中")
             
-            result = diarize_and_merge(job.file_path, output_dir, config, words, segments)
+            result = diarize_and_merge(audio_file, output_dir, config, words, segments)
             
             self.phase_progress_updated.emit(str(job.file_path), 1, 95.0, "話者ラベル統合中")
             
@@ -735,8 +752,8 @@ class MainWindow(QMainWindow):
             
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "WAVファイルを選択",
-            "", "WAV Files (*.wav)"
+            self, "音声・動画ファイルを選択",
+            "", "Media Files (*.wav *.mp4 *.mkv *.avi *.mov *.flv *.wmv *.webm *.m4v *.mp3 *.m4a *.flac *.ogg);;All Files (*.*)"
         )
         
         for file_path in files:
@@ -748,7 +765,7 @@ class MainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "フォルダを選択")
         if folder:
             folder_path = Path(folder)
-            extensions = ['.wav']
+            extensions = ['.wav', '.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.m4v', '.mp3', '.m4a', '.flac', '.ogg']
             
             for ext in extensions:
                 for file_path in folder_path.glob(f"*{ext}"):
@@ -1003,6 +1020,15 @@ def main():
     
     window = MainWindow()
     window.show()
+    
+    if not VideoConverter.is_ffmpeg_available():
+        QMessageBox.warning(
+            window, "FFmpeg未検出", 
+            "FFmpegがインストールされていないか、PATHに設定されていません。\n\n"
+            "動画ファイルの変換機能は使用できません。WAVファイルのみ処理可能です。\n\n"
+            "動画ファイルを処理したい場合は、FFmpegをインストールしてください:\n"
+            "https://ffmpeg.org/download.html"
+        )
     
     sys.exit(app.exec())
 

@@ -12,6 +12,8 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 import pandas as pd
 
+from fwhisper_batch.video_converter import VideoConverter
+
 
 def detect_device() -> str:
     try:
@@ -340,14 +342,34 @@ def main():
     if missing:
         raise SystemExit("Input files not found:\n- " + "\n- ".join(missing))
 
+    if not VideoConverter.is_ffmpeg_available():
+        print("[warning] ffmpeg not found. Video conversion will not be available.")
+        print("[warning] Only WAV files will be processed.")
+    
+    temp_audio_dir = out_dir / "converted_audio"
+
     for idx, p in enumerate(tqdm(inputs, desc="🎧 Transcribing", unit="file"), start=1):
         target_out = out_dir / f"output_{p.stem}"
+        
+        audio_file = p
+        was_converted = False
+        
+        try:
+            if p.suffix.lower() != '.wav':
+                print(f"\n[info] Converting {p.name} to WAV...")
+                audio_file, was_converted = VideoConverter.prepare_file_for_transcription(p, temp_audio_dir)
+                if was_converted:
+                    print(f"[info] Converted to: {audio_file.name}")
+        except Exception as e:
+            print(f"\n[error] Failed to convert {p.name}: {e}")
+            print(f"[error] Skipping {p.name}")
+            continue
         
         use_word_timestamps = args.word_timestamps or enable_diarization
         
         result = transcribe_one(
             model,
-            p,
+            audio_file,
             target_out,
             language,
             beam_size,
