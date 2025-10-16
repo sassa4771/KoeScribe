@@ -68,11 +68,13 @@ class VideoConverter:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=True,
-                text=True
+                encoding='utf-8',
+                errors='replace'
             )
             return output_path, is_video
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"ffmpeg conversion failed: {e.stderr}")
+            error_msg = e.stderr if isinstance(e.stderr, str) else e.stderr.decode('utf-8', errors='replace')
+            raise RuntimeError(f"ffmpeg conversion failed: {error_msg}")
     
     @staticmethod
     def prepare_file_for_transcription(file_path: Path, temp_dir: Optional[Path] = None) -> Tuple[Path, bool]:
