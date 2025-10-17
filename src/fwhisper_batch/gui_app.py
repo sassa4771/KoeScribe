@@ -198,19 +198,20 @@ class TranscriptionWorker(QThread):
             temp_audio_dir = None
             
             if job.file_path.suffix.lower() != '.wav':
-                self.progress_updated.emit(str(job.file_path), 0.0, "動画変換中...")
-                self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "動画変換中")
+                self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "WAV変換開始")
                 
                 try:
                     temp_audio_dir = Path(job.settings_preset.output_dir) / "converted_audio"
                     audio_file, was_converted = VideoConverter.prepare_file_for_transcription(
                         job.file_path, temp_audio_dir
                     )
+                    self.phase_progress_updated.emit(str(job.file_path), 0, 100.0, "WAV変換完了")
                 except Exception as e:
                     raise Exception(f"動画変換エラー: {str(e)}")
+            else:
+                self.phase_progress_updated.emit(str(job.file_path), 0, 100.0, "WAV変換スキップ")
             
-            self.progress_updated.emit(str(job.file_path), 0.0, "モデル読み込み中...")
-            self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "モデル読み込み中")
+            self.phase_progress_updated.emit(str(job.file_path), 1, 0.0, "モデル読み込み中")
             
             if self.model is None:
                 device = resolve_device(job.settings_preset.device)
@@ -224,32 +225,32 @@ class TranscriptionWorker(QThread):
             output_dir = Path(job.settings_preset.output_dir) / f"output_{job.file_path.stem}"
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "文字起こし開始")
+            self.phase_progress_updated.emit(str(job.file_path), 1, 0.0, "文字起こし開始")
             
             def transcription_progress_callback(progress: float):
-                self.phase_progress_updated.emit(str(job.file_path), 0, progress, "文字起こし中")
+                self.phase_progress_updated.emit(str(job.file_path), 1, progress, "文字起こし中")
             
             result = self._transcribe_with_progress(
                 job, audio_file, output_dir, transcription_progress_callback
             )
             
-            self.phase_progress_updated.emit(str(job.file_path), 0, 100.0, "文字起こし完了")
+            self.phase_progress_updated.emit(str(job.file_path), 1, 100.0, "文字起こし完了")
             
             if job.settings_preset.enable_diarization:
-                self.phase_progress_updated.emit(str(job.file_path), 1, 0.0, "話者分離開始")
+                self.phase_progress_updated.emit(str(job.file_path), 2, 0.0, "話者分離開始")
                 
                 diarization_result = self._perform_diarization(job, audio_file, output_dir, result)
                 if diarization_result:
                     result["diarization"] = diarization_result
-                    self.phase_progress_updated.emit(str(job.file_path), 1, 100.0, "話者分離完了")
+                    self.phase_progress_updated.emit(str(job.file_path), 2, 100.0, "話者分離完了")
                 else:
-                    self.phase_progress_updated.emit(str(job.file_path), 1, 100.0, "話者分離スキップ")
+                    self.phase_progress_updated.emit(str(job.file_path), 2, 100.0, "話者分離スキップ")
             else:
-                self.phase_progress_updated.emit(str(job.file_path), 1, 100.0, "話者分離無効")
+                self.phase_progress_updated.emit(str(job.file_path), 2, 100.0, "話者分離無効")
             
-            self.phase_progress_updated.emit(str(job.file_path), 2, 0.0, "CSV変換開始")
+            self.phase_progress_updated.emit(str(job.file_path), 3, 0.0, "CSV変換開始")
             self._convert_to_csv(output_dir, job.file_path.stem, result)
-            self.phase_progress_updated.emit(str(job.file_path), 2, 100.0, "CSV変換完了")
+            self.phase_progress_updated.emit(str(job.file_path), 3, 100.0, "CSV変換完了")
             
             job.result = result
             
@@ -292,7 +293,7 @@ class TranscriptionWorker(QThread):
         try:
             import time
             
-            self.phase_progress_updated.emit(str(job.file_path), 1, 10.0, "話者分離モデル読み込み中")
+            self.phase_progress_updated.emit(str(job.file_path), 2, 10.0, "話者分離モデル読み込み中")
             time.sleep(0.1)  # Small delay to show progress
             
             words_file = output_dir / f"{job.file_path.stem}_words.csv"
@@ -301,7 +302,7 @@ class TranscriptionWorker(QThread):
             if not words_file.exists() or not segments_file.exists():
                 return None
             
-            self.phase_progress_updated.emit(str(job.file_path), 1, 30.0, "音声データ解析中")
+            self.phase_progress_updated.emit(str(job.file_path), 2, 30.0, "音声データ解析中")
             
             words_df = pd.read_csv(words_file, encoding='utf-8-sig')
             words = words_df.to_dict('records')
@@ -309,15 +310,15 @@ class TranscriptionWorker(QThread):
             segments_df = pd.read_csv(segments_file, encoding='utf-8-sig')
             segments = segments_df.to_dict('records')
             
-            self.phase_progress_updated.emit(str(job.file_path), 1, 55.0, "話者埋め込み抽出中")
+            self.phase_progress_updated.emit(str(job.file_path), 2, 55.0, "話者埋め込み抽出中")
             
             config = asdict(job.settings_preset)
             
-            self.phase_progress_updated.emit(str(job.file_path), 1, 80.0, "話者クラスタリング中")
+            self.phase_progress_updated.emit(str(job.file_path), 2, 80.0, "話者クラスタリング中")
             
             result = diarize_and_merge(audio_file, output_dir, config, words, segments)
             
-            self.phase_progress_updated.emit(str(job.file_path), 1, 95.0, "話者ラベル統合中")
+            self.phase_progress_updated.emit(str(job.file_path), 2, 95.0, "話者ラベル統合中")
             
             return result
             
@@ -538,6 +539,15 @@ class MainWindow(QMainWindow):
         
         self.current_file_label = QLabel("待機中")
         progress_layout.addWidget(self.current_file_label)
+        
+        phase0_layout = QHBoxLayout()
+        self.phase0_label = QLabel("0. WAV変換:")
+        self.phase0_progress = QProgressBar()
+        self.phase0_status = QLabel("待機中")
+        phase0_layout.addWidget(self.phase0_label)
+        phase0_layout.addWidget(self.phase0_progress)
+        phase0_layout.addWidget(self.phase0_status)
+        progress_layout.addLayout(phase0_layout)
         
         phase1_layout = QHBoxLayout()
         self.phase1_label = QLabel("1. 文字起こし:")
@@ -837,8 +847,8 @@ class MainWindow(QMainWindow):
                 
     def update_phase_progress(self, file_path: str, phase_index: int, progress: float, phase_name: str):
         """Update progress for a specific phase"""
-        phase_bars = [self.phase1_progress, self.phase2_progress, self.phase3_progress]
-        phase_labels = [self.phase1_status, self.phase2_status, self.phase3_status]
+        phase_bars = [self.phase0_progress, self.phase1_progress, self.phase2_progress, self.phase3_progress]
+        phase_labels = [self.phase0_status, self.phase1_status, self.phase2_status, self.phase3_status]
         
         for i, (bar, label) in enumerate(zip(phase_bars, phase_labels)):
             if i < phase_index:
@@ -851,7 +861,7 @@ class MainWindow(QMainWindow):
                 bar.setValue(0)
                 label.setText("待機中")
         
-        overall_progress = (phase_index * 100 + progress) / 3
+        overall_progress = (phase_index * 100 + progress) / 4
         self.progress_bar.setValue(int(overall_progress))
         
         file_name = Path(file_path).name
@@ -865,8 +875,8 @@ class MainWindow(QMainWindow):
         
     def reset_phase_progress(self):
         """Reset all phase progress bars to initial state"""
-        phase_bars = [self.phase1_progress, self.phase2_progress, self.phase3_progress]
-        phase_labels = [self.phase1_status, self.phase2_status, self.phase3_status]
+        phase_bars = [self.phase0_progress, self.phase1_progress, self.phase2_progress, self.phase3_progress]
+        phase_labels = [self.phase0_status, self.phase1_status, self.phase2_status, self.phase3_status]
         
         for bar, label in zip(phase_bars, phase_labels):
             bar.setValue(0)
