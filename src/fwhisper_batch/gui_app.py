@@ -517,11 +517,11 @@ class MainWindow(QMainWindow):
         processing_tab = QWidget()
         processing_layout = QVBoxLayout(processing_tab)
         
-        file_group = QGroupBox("ファイル選択 (WAVファイルのみ)")
+        file_group = QGroupBox("ファイル選択")
         file_layout = QVBoxLayout(file_group)
         
         file_buttons = QHBoxLayout()
-        self.add_files_btn = QPushButton("WAVファイル追加")
+        self.add_files_btn = QPushButton("ファイル追加")
         self.add_folder_btn = QPushButton("フォルダ追加")
         self.clear_files_btn = QPushButton("クリア")
         file_buttons.addWidget(self.add_files_btn)
