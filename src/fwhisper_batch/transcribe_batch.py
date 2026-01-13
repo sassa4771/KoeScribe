@@ -56,7 +56,9 @@ def write_csv(path: Path, rows: List[Dict[str, Any]]):
 
 def is_diarization_enabled(cfg: Dict[str, Any]) -> bool:
     """Check if diarization is enabled based on config"""
-    return bool(cfg.get("diarize_model")) and bool(os.getenv("HUGGINGFACE_TOKEN"))
+    # トークンがなくても、ローカルキャッシュがあれば動作可能
+    # ただし、初回ダウンロード時はトークンが必要
+    return bool(cfg.get("diarize_model"))
 
 
 def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], words: List[Dict[str, Any]], segments: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -66,16 +68,23 @@ def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], word
         from tools.merge_speakers import assign_speakers_to_words
         
         token = os.getenv("HUGGINGFACE_TOKEN")
-        if not token:
-            print(f"[warning] HUGGINGFACE_TOKEN not set, skipping diarization for {audio_path.name}")
-            return None
-            
+        # トークンがなくても、ローカルキャッシュがあれば動作可能
+        # ただし、初回ダウンロード時はトークンが必要
+        
         spans_path = out_dir / "spans.csv"
         diarize_model = cfg.get("diarize_model", "pyannote/speaker-diarization")
         min_dur = float(cfg.get("diarize_min_dur", 0.8))
         bridge_gap = float(cfg.get("diarize_bridge_gap", 0.3))
         
-        diarize_one(audio_path, spans_path, diarize_model, token, min_dur, bridge_gap)
+        try:
+            diarize_one(audio_path, spans_path, diarize_model, token, min_dur, bridge_gap)
+        except Exception as e:
+            if not token:
+                print(f"[warning] HUGGINGFACE_TOKEN not set, and model not in local cache.")
+                print(f"  初回ダウンロード時はトークンが必要です。エラー: {str(e)}")
+            else:
+                print(f"[warning] Diarization failed: {str(e)}")
+            return None
         
         spans = []
         if spans_path.exists():

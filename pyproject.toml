@@ -28,3 +28,13 @@ package = true
 [tool.uv.sources]
 # ← ここをマップ形式に
 fwhisper_batch = { path = "src/fwhisper_batch" }
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.17.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.0.0",
+]

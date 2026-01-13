@@ -1,7 +1,7 @@
 # src/tools/diarize.py
 import os, json, argparse
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from tqdm import tqdm
 import pandas as pd
@@ -41,10 +41,46 @@ def postprocess_segments(rows, min_dur=0.8, bridge_gap=0.3):
     merged.append(cur)
     return merged
 
-def diarize_one(audio_path: Path, out_path: Path, model_id: str, token: str,
+def diarize_one(audio_path: Path, out_path: Path, model_id: str, token: Optional[str],
                 min_dur: float, bridge_gap: float):
+    """
+    話者分離を実行
+    
+    Args:
+        token: Hugging Faceトークン。Noneの場合はローカルキャッシュから読み込みを試みる
+              初回ダウンロード時のみ必要
+    """
     from pyannote.audio import Pipeline
-    pipeline = Pipeline.from_pretrained(model_id, use_auth_token=token)
+    
+    # トークンがなくても、ローカルキャッシュがあれば使用可能
+    try:
+        if token:
+            # トークンがある場合は使用（初回ダウンロード時）
+            pipeline = Pipeline.from_pretrained(model_id, use_auth_token=token)
+        else:
+            # トークンがない場合は、ローカルキャッシュから読み込みを試みる
+            # 初回ダウンロード時はエラーになる可能性がある
+            try:
+                pipeline = Pipeline.from_pretrained(model_id)
+            except Exception as e:
+                raise Exception(
+                    f"モデルの読み込みに失敗しました。初回ダウンロード時はHUGGINGFACE_TOKENが必要です。\n"
+                    f"エラー: {str(e)}\n"
+                    f"解決方法: .envファイルにHUGGINGFACE_TOKENを設定してください。"
+                )
+    except Exception as e:
+        # use_auth_tokenが非推奨の場合、tokenパラメータを試す
+        try:
+            if token:
+                pipeline = Pipeline.from_pretrained(model_id, token=token)
+            else:
+                pipeline = Pipeline.from_pretrained(model_id)
+        except Exception as e2:
+            raise Exception(
+                f"モデルの読み込みに失敗しました: {str(e2)}\n"
+                f"初回ダウンロード時はHUGGINGFACE_TOKENが必要です。"
+            )
+    
     diar = pipeline(str(audio_path))  # pyannote.core.Annotation
     rows = [{"start": float(turn.start), "end": float(turn.end), "speaker": str(spk)}
             for turn, _, spk in diar.itertracks(yield_label=True)]
@@ -83,8 +119,12 @@ def main():
         raise SystemExit("audio_files が空です。config.json に列挙するか、--files で指定してください。")
 
     token = os.getenv("HUGGINGFACE_TOKEN")
+    # トークンがなくても、ローカルキャッシュがあれば動作可能
+    # ただし、初回ダウンロード時はトークンが必要
     if not token:
-        raise SystemExit("HUGGINGFACE_TOKEN が未設定です。プロジェクト直下の .env に記載してください。")
+        print("[warning] HUGGINGFACE_TOKEN が未設定です。")
+        print("  ローカルキャッシュからモデルを読み込みます。")
+        print("  初回ダウンロード時はトークンが必要です。")
 
     # 入力存在チェック
     inputs = [root_dir / f for f in files]

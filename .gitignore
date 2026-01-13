@@ -7,11 +7,15 @@ __pycache__/
 .venv/
 uv.lock
 
+# Environment files
+.env
+
 # Build artifacts
 build/
 dist/
 *.egg-info/
-*.spec
+# koescribe-gui.spec はリポジトリに含める
+!koescribe-gui.spec
 
 # Outputs
 outputs/
@@ -20,4 +24,5 @@ outputs/
 *.egg-info/
 dist/
 build/
-*.spec
+# koescribe-gui.spec はリポジトリに含める
+!koescribe-gui.spec

@@ -76,14 +76,26 @@ uv sync
 
 ### 3. 話者分離機能の設定（オプション）
 
-話者分離機能を使用する場合は、Hugging Face トークンが必要です：
+話者分離機能はオプションです。使用しない場合は設定不要です。
 
-#### Hugging Face トークンの取得
+#### なぜHugging Faceトークンが必要なのか？
+
+`pyannote/speaker-diarization`モデルは、Hugging Face Hubでホストされており、**利用規約への同意のため、初回ダウンロード時に認証が必要**です。
+
+**重要なポイント：**
+- **初回ダウンロード時のみ**トークンが必要です
+- 一度ダウンロードすれば、ローカルキャッシュに保存され、**次回以降はトークンなしで使用可能**です
+- 話者分離機能を使用しない場合は、トークンは不要です
+
+#### Hugging Face トークンの取得（話者分離機能を使用する場合）
+
 1. [Hugging Face](https://huggingface.co) でアカウントを作成
-2. [Settings > Access Tokens](https://huggingface.co/settings/tokens) でアクセストークンを作成
-3. **Read** 権限のトークンを生成
+2. [pyannote/speaker-diarization](https://huggingface.co/pyannote/speaker-diarization) の利用規約に同意
+3. [Settings > Access Tokens](https://huggingface.co/settings/tokens) でアクセストークンを作成
+4. **Read** 権限のトークンを生成
 
 #### 設定ファイルの作成
+
 プロジェクトルートに `.env` ファイルを作成：
 
 ```bash
@@ -96,9 +108,9 @@ echo "HUGGINGFACE_TOKEN=hf_your_token_here" > .env
 echo "HUGGINGFACE_TOKEN=hf_your_token_here" | Out-File -FilePath .env -Encoding utf8
 ```
 
-> [!IMPORTANT]
-> .envファイルを作成して、
-> hf_your_token_hereに自分のトークンを設定してください。
+> [!NOTE]
+> 初回ダウンロード後、モデルはローカルキャッシュ（`~/.cache/huggingface/`）に保存されます。
+> 次回以降は、トークンなしでも話者分離機能を使用できます。
 
 ---
 
@@ -288,10 +300,11 @@ python --version  # 3.9以上が必要
 #### 2. 話者分離が動作しない
 **症状**: 「完了 (話者分離スキップ)」と表示される
 **解決策**:
-1. `.env`ファイルに`HUGGINGFACE_TOKEN`が設定されているか確認
-2. `config.json`に`diarize_model`が設定されているか確認
-3. Hugging Face トークンが有効か確認
-4. pyannote/speaker-diarization モデルの利用規約に同意しているか確認
+1. **初回ダウンロード時**: `.env`ファイルに`HUGGINGFACE_TOKEN`が設定されているか確認
+2. **2回目以降**: ローカルキャッシュ（`~/.cache/huggingface/`）にモデルがダウンロードされているか確認
+3. `config.json`に`diarize_model`が設定されているか確認
+4. Hugging Face トークンが有効か確認（初回のみ）
+5. [pyannote/speaker-diarization](https://huggingface.co/pyannote/speaker-diarization) モデルの利用規約に同意しているか確認（初回のみ）
 
 #### 3. Hugging Face トークンエラー
 **症状**: `Authentication failed` エラー
@@ -426,6 +439,136 @@ uv run python -c "import ctranslate2 as c; print('CUDA GPUs:', c.get_cuda_device
 `CUDA GPUs: 1` 以上が表示されれば、`device=auto` で **GPU (cuda)** が選ばれます。
 
 > NOTE: CTranslate2 の pip ホイールは必要な CUDA/cuDNN ランタイムを同梱しています。OS 側に CUDA Toolkit を入れ
+
+---
+
+## 📦 EXE形式での配布（ノンプログラマー向け）
+
+このアプリケーションをexe形式にビルドして、Pythonをインストールしていない環境でも使用できるようにできます。
+
+### ビルド方法
+
+#### Windows
+
+```powershell
+# ビルドスクリプトを実行
+.\build_exe.ps1
+```
+
+ビルドが完了すると、`dist\KoeScribe-GUI.exe` が生成されます。
+
+#### Linux / macOS
+
+```bash
+# ビルドスクリプトを実行
+bash build_exe.sh
+```
+
+ビルドが完了すると、`dist/KoeScribe-GUI` が生成されます。
+
+### ビルド後の配布
+
+#### 必要なファイル
+
+exeファイルを配布する際は、以下の点に注意してください：
+
+1. **exeファイル**: `dist\KoeScribe-GUI.exe`（Windows）または `dist/KoeScribe-GUI`（Linux/macOS）
+2. **.envファイル（オプション）**: **話者分離機能を使用する場合のみ必要**
+   - GUIの「話者分離」チェックボックスをOFFにすれば、`.env`ファイルは**不要**です
+   - 話者分離機能を使用する場合のみ、exeファイルと同じディレクトリに `.env` ファイルを配置
+   - 内容: `HUGGINGFACE_TOKEN=hf_your_token_here`
+   - **重要**: 各ユーザーが個別に初回ダウンロードする必要があります
+     - ユーザーAがダウンロードしても、ユーザーBは別途ダウンロードが必要です
+     - モデルは各ユーザーのホームディレクトリ（`~/.cache/huggingface/`）に保存されます
+
+#### 初回実行時の注意
+
+- **モデルファイルのダウンロード**: 初回実行時、Whisperモデルが自動的にダウンロードされます
+  - ダウンロード先: ユーザーのホームディレクトリ（`~/.cache/huggingface/` など）
+  - インターネット接続が必要です
+  - モデルサイズによっては数GBの容量が必要です
+
+- **話者分離機能**: 話者分離機能を使用する場合のみ必要
+  - GUIの「話者分離」チェックボックスをONにする場合のみ、`.env` ファイルに `HUGGINGFACE_TOKEN` を設定してください
+  - 「話者分離」チェックボックスをOFFにすれば、`.env`ファイルは不要です（文字起こしのみの機能が使用できます）
+  - **初回ダウンロード時のみ**トークンが必要です。一度ダウンロードすれば、ローカルキャッシュに保存され、次回以降はトークンなしで使用できます
+  - Hugging Face のアカウントとトークンが必要です（初回のみ）
+  - **重要（exe版）**: 各ユーザーが個別に初回ダウンロードする必要があります
+    - モデルは各ユーザーのホームディレクトリ（`~/.cache/huggingface/`）に保存されます
+    - ユーザーAがダウンロードしても、ユーザーBは別途ダウンロードが必要です
+    - 同じPCで複数ユーザーが使用する場合、各ユーザーが初回のみトークンを設定する必要があります
+
+#### 配布パッケージの構成例
+
+```
+KoeScribe/
+├── KoeScribe-GUI.exe          # メイン実行ファイル
+├── .env                        # 話者分離用トークン（オプション）
+└── README.txt                  # 使用方法（簡易版）
+```
+
+### トラブルシューティング（EXE版）
+
+#### 1. ビルドエラーが発生する
+
+**症状**: `build_exe.ps1` 実行時にエラーが発生
+
+**解決策**:
+```powershell
+# 依存関係を再インストール
+uv clean
+uv sync
+
+# PyInstallerを再インストール
+uv add --dev pyinstaller
+
+# 再度ビルド
+.\build_exe.ps1
+```
+
+#### 2. exeファイルが起動しない
+
+**症状**: exeファイルをダブルクリックしても何も起動しない
+
+**解決策**:
+- コマンドプロンプトから実行してエラーメッセージを確認
+  ```powershell
+  .\dist\KoeScribe-GUI.exe
+  ```
+- ウイルス対策ソフトがブロックしていないか確認
+- Windows Defender などのセキュリティソフトの除外リストに追加
+
+#### 3. モデルがダウンロードされない
+
+**症状**: 初回実行時にモデルがダウンロードされない
+
+**解決策**:
+- インターネット接続を確認
+- ファイアウォールがブロックしていないか確認
+- ユーザーのホームディレクトリに書き込み権限があるか確認
+
+#### 4. 話者分離が動作しない（EXE版）
+
+**症状**: 話者分離機能が「スキップ」と表示される
+
+**解決策**:
+1. **初回ダウンロード時**: 
+   - exeファイルと同じディレクトリに `.env` ファイルがあるか確認
+   - `.env` ファイルの内容が正しいか確認（`HUGGINGFACE_TOKEN=hf_...`）
+   - トークンが有効か確認（Hugging Face のサイトで確認）
+2. **2回目以降**:
+   - ローカルキャッシュ（`~/.cache/huggingface/`）にモデルがダウンロードされているか確認
+   - 初回ダウンロード時にトークンを使用してモデルをダウンロードしていれば、トークンなしで動作します
+
+### ビルドオプションのカスタマイズ
+
+`koescribe-gui.spec` ファイルを編集することで、ビルド設定をカスタマイズできます：
+
+- **アイコンの変更**: `icon` パラメータを変更
+- **コンソール表示**: `console=True` に変更するとデバッグ情報が表示されます
+- **ファイルサイズの最適化**: `upx=True` で圧縮（UPXがインストールされている場合）
+
+詳細は [PyInstaller のドキュメント](https://pyinstaller.org/) を参照してください。
 
 ---
 

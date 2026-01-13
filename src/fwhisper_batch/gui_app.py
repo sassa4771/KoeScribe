@@ -31,6 +31,61 @@ from fwhisper_batch.transcribe_batch import (
 from fwhisper_batch.video_converter import VideoConverter
 
 
+def load_env_file():
+    """Load .env file from executable directory or current directory"""
+    # PyInstallerでビルドされた場合、sys.executableはexeファイルのパス
+    if getattr(sys, 'frozen', False):
+        # exeファイルと同じディレクトリから.envを読み込む
+        exe_dir = Path(sys.executable).parent
+        env_path = exe_dir / '.env'
+        if env_path.exists():
+            _load_env_with_encoding(env_path)
+        else:
+            # 見つからない場合はデフォルトの動作
+            _load_env_with_encoding()
+    else:
+        # 通常のPython実行時
+        _load_env_with_encoding()
+
+
+def _load_env_with_encoding(env_path=None):
+    """複数のエンコーディングを試して.envファイルを読み込む"""
+    encodings = ['utf-8', 'utf-8-sig', 'shift_jis', 'cp932']
+    
+    for encoding in encodings:
+        try:
+            if env_path:
+                # ファイルを明示的に開いて読み込む
+                with open(env_path, 'r', encoding=encoding) as f:
+                    load_dotenv(stream=f, override=True)
+                return
+            else:
+                # デフォルトの.envファイルを読み込む
+                env_file = Path('.env')
+                if env_file.exists():
+                    with open(env_file, 'r', encoding=encoding) as f:
+                        load_dotenv(stream=f, override=True)
+                    return
+                else:
+                    # .envファイルが存在しない場合はデフォルトの動作
+                    load_dotenv()
+                    return
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+        except Exception as e:
+            # その他のエラー（ファイルが存在しないなど）は無視
+            if env_path is None:
+                # .envファイルが存在しない場合はデフォルトの動作
+                load_dotenv()
+            return
+    
+    # すべてのエンコーディングで失敗した場合
+    if env_path:
+        print(f"[warning] Failed to load .env file with multiple encodings: {env_path}")
+    else:
+        print("[warning] Failed to load .env file with multiple encodings")
+
+
 HELP_TOOLTIPS = {
     "beam_size": "ビームサーチのサイズ。大きいほど精度が向上しますが処理時間が増加します。\n推奨値: 1-10 (デフォルト: 5)",
     "model_size": "Whisperモデルのサイズ。large-v3が最も精度が高く、smallが最も高速です。\n選択肢: tiny, base, small, medium, large-v3",
@@ -170,20 +225,31 @@ class TranscriptionWorker(QThread):
         
     def stop_processing(self):
         self.should_stop = True
-        self.jobs.put(None)
+        # キューをクリアするためにNoneを追加
+        try:
+            self.jobs.put_nowait(None)
+        except:
+            pass
         
     def run(self):
+        self.should_stop = False  # リセット
         while not self.should_stop:
             try:
                 job = self.jobs.get(block=True, timeout=None)
                 if job is None:
                     break
+                if self.should_stop:
+                    break
                 self.current_job = job
                 self.process_job(job)
                 self.jobs.task_done()
                 self.queue_updated.emit(self.jobs.qsize())
+                self.current_job = None  # ジョブ完了後にクリア
             except Exception as e:
                 print(f"Error in worker thread: {e}")
+                import traceback
+                traceback.print_exc()
+                self.current_job = None
                 continue
         
         self.current_job = None
@@ -292,6 +358,11 @@ class TranscriptionWorker(QThread):
             
         try:
             import time
+            import os
+            
+            # トークンの有無を確認
+            token = os.getenv("HUGGINGFACE_TOKEN")
+            has_token = bool(token)
             
             self.phase_progress_updated.emit(str(job.file_path), 2, 10.0, "話者分離モデル読み込み中")
             time.sleep(0.1)  # Small delay to show progress
@@ -319,6 +390,12 @@ class TranscriptionWorker(QThread):
             result = diarize_and_merge(audio_file, output_dir, config, words, segments)
             
             self.phase_progress_updated.emit(str(job.file_path), 2, 95.0, "話者ラベル統合中")
+            
+            # トークンが設定されているが失敗した場合は、結果にフラグを追加
+            if not result and has_token:
+                # トークンは設定されているが、他の理由で失敗した可能性
+                # メッセージは表示しない（トークン設定の問題ではない）
+                pass
             
             return result
             
@@ -362,7 +439,7 @@ class SettingsManager:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        load_dotenv()
+        load_env_file()
         
         self.settings_manager = SettingsManager()
         self.worker = TranscriptionWorker()
@@ -579,16 +656,35 @@ class MainWindow(QMainWindow):
         overall_layout = QHBoxLayout()
         overall_layout.addWidget(QLabel("全体進捗:"))
         self.progress_bar = QProgressBar()
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                text-align: center;
+                font-weight: bold;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+                border-radius: 3px;
+            }
+        """)
         overall_layout.addWidget(self.progress_bar)
         progress_layout.addLayout(overall_layout)
         
+        # ステータス情報を整理
+        status_layout = QHBoxLayout()
         self.stage_label = QLabel("")
+        self.stage_label.setStyleSheet("font-weight: bold; color: #2196F3;")
         self.queue_label = QLabel("キュー: 0件")
-        progress_layout.addWidget(self.stage_label)
-        progress_layout.addWidget(self.queue_label)
+        self.queue_label.setStyleSheet("font-weight: bold; color: #666;")
+        status_layout.addWidget(self.stage_label)
+        status_layout.addStretch()
+        status_layout.addWidget(self.queue_label)
+        progress_layout.addLayout(status_layout)
         
         control_buttons = QHBoxLayout()
         self.start_btn = QPushButton("処理開始")
+        self.start_btn.setEnabled(False)  # 初期状態では無効
         self.stop_btn = QPushButton("停止")
         self.stop_btn.setEnabled(False)
         control_buttons.addWidget(self.start_btn)
@@ -760,16 +856,94 @@ class MainWindow(QMainWindow):
         if default_preset:
             self.apply_preset(default_preset)
             
+    def add_files_to_queue(self, file_paths: List[Path], add_to_list: bool = True):
+        """ファイルをキューに追加する共通処理"""
+        preset = self.get_current_preset()
+        added_count = 0
+        skipped_count = 0
+        
+        # 既にキューに追加されているファイルパスを取得
+        existing_paths = set()
+        for job in self.jobs:
+            existing_paths.add(str(job.file_path))
+        
+        # 現在処理中のファイルもチェック
+        if self.worker.current_job:
+            existing_paths.add(str(self.worker.current_job.file_path))
+        
+        # ワーカーのキュー内のファイルパスもチェック（処理中の場合）
+        if self.worker.isRunning():
+            temp_jobs = []
+            while not self.worker.jobs.empty():
+                try:
+                    job = self.worker.jobs.get_nowait()
+                    temp_jobs.append(job)
+                    existing_paths.add(str(job.file_path))
+                except queue.Empty:
+                    break
+                except Exception:
+                    break
+            
+            # 一時的に取り出したジョブを戻す
+            for job in temp_jobs:
+                self.worker.jobs.put(job)
+        
+        for file_path in file_paths:
+            file_path_str = str(file_path)
+            
+            # 既にキューに追加されているかチェック
+            if file_path_str in existing_paths:
+                skipped_count += 1
+                continue
+            
+            # ファイルリストに追加
+            if add_to_list:
+                item = QListWidgetItem(file_path_str)
+                self.file_list.addItem(item)
+            
+            # ジョブを作成（ワーカーのキューには追加しない）
+            job = ProcessingJob(file_path, preset)
+            self.jobs.append(job)
+            # ワーカーのキューには追加しない（処理開始時に追加）
+            existing_paths.add(file_path_str)
+            added_count += 1
+            
+            # 結果テーブルに行を追加
+            row = self.results_table.rowCount()
+            self.results_table.insertRow(row)
+            self.results_table.setItem(row, 0, QTableWidgetItem(file_path.name))
+            self.results_table.setItem(row, 1, QTableWidgetItem("待機中"))
+            self.results_table.setItem(row, 2, QTableWidgetItem(""))
+            self.results_table.setItem(row, 3, QTableWidgetItem(""))
+        
+        # ファイル追加時は自動で処理を開始しない
+        # 処理開始ボタンを有効化
+        if added_count > 0:
+            self.start_btn.setEnabled(True)
+            self.update_queue_display()
+        
+        return added_count, skipped_count
+    
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
             self, "音声・動画ファイルを選択",
             "", "Media Files (*.wav *.mp4 *.mkv *.avi *.mov *.flv *.wmv *.webm *.m4v *.mp3 *.m4a *.flac *.ogg);;All Files (*.*)"
         )
         
-        for file_path in files:
-            item = QListWidgetItem(file_path)
-            self.file_list.addItem(item)
+        if files:
+            file_paths = [Path(f) for f in files]
+            added, skipped = self.add_files_to_queue(file_paths, add_to_list=True)
             
+            if skipped > 0:
+                QMessageBox.information(
+                    self, "ファイル追加",
+                    f"{added}件のファイルをキューに追加しました。\n{skipped}件のファイルは既にキューに含まれています。"
+                )
+            elif added > 0:
+                QMessageBox.information(
+                    self, "ファイル追加",
+                    f"{added}件のファイルをキューに追加しました。"
+                )
                 
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "フォルダを選択")
@@ -777,14 +951,37 @@ class MainWindow(QMainWindow):
             folder_path = Path(folder)
             extensions = ['.wav', '.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.m4v', '.mp3', '.m4a', '.flac', '.ogg']
             
+            file_paths = []
             for ext in extensions:
                 for file_path in folder_path.glob(f"*{ext}"):
-                    item = QListWidgetItem(str(file_path))
-                    self.file_list.addItem(item)
-                    
+                    file_paths.append(file_path)
+            
+            if file_paths:
+                added, skipped = self.add_files_to_queue(file_paths, add_to_list=True)
+                
+                if skipped > 0:
+                    QMessageBox.information(
+                        self, "フォルダ追加",
+                        f"{added}件のファイルをキューに追加しました。\n{skipped}件のファイルは既にキューに含まれています。"
+                    )
+                elif added > 0:
+                    QMessageBox.information(
+                        self, "フォルダ追加",
+                        f"{added}件のファイルをキューに追加しました。"
+                    )
+            else:
+                QMessageBox.information(
+                    self, "フォルダ追加",
+                    "選択したフォルダに処理可能なファイルが見つかりませんでした。"
+                )
                     
     def clear_files(self):
-        self.file_list.clear()
+        reply = QMessageBox.question(
+            self, "確認", "ファイルリストをクリアしますか？\n（処理中のジョブは影響を受けません）",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.file_list.clear()
         
     def select_output_dir(self):
         folder = QFileDialog.getExistingDirectory(self, "出力フォルダを選択")
@@ -799,21 +996,27 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "出力ディレクトリが存在しません。")
             
     def start_processing(self):
-        if self.file_list.count() == 0:
-            QMessageBox.warning(self, "警告", "処理するファイルを選択してください。")
+        # キューにジョブがない場合は警告
+        if len(self.jobs) == 0:
+            QMessageBox.warning(self, "警告", "処理するファイルを追加してください。")
             return
-            
+        
+        # 既に処理中の場合は何もしない
+        if self.worker.isRunning():
+            QMessageBox.information(
+                self, "処理中",
+                "既に処理が実行中です。処理完了を待つか、停止ボタンで停止してください。"
+            )
+            return
+        
+        # 処理開始時
         self.reset_phase_progress()
         
-        preset = self.get_current_preset()
-        self.jobs.clear()
-        
-        for i in range(self.file_list.count()):
-            file_path = Path(self.file_list.item(i).text())
-            job = ProcessingJob(file_path, preset)
-            self.jobs.append(job)
+        # 既にキューに追加されているジョブをワーカーのキューに追加
+        # （ファイル追加時にワーカーのキューには追加していないため）
+        for job in self.jobs:
             self.worker.add_job(job)
-            
+        
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         
@@ -821,13 +1024,6 @@ class MainWindow(QMainWindow):
             first_file = str(self.jobs[0].file_path)
             self.start_processing_timer(first_file)
         
-        self.results_table.setRowCount(len(self.jobs))
-        for i, job in enumerate(self.jobs):
-            self.results_table.setItem(i, 0, QTableWidgetItem(job.file_path.name))
-            self.results_table.setItem(i, 1, QTableWidgetItem("待機中"))
-            self.results_table.setItem(i, 2, QTableWidgetItem(""))
-            self.results_table.setItem(i, 3, QTableWidgetItem(""))
-            
         self.worker.start()
         
     def stop_processing(self):
@@ -871,7 +1067,30 @@ class MainWindow(QMainWindow):
                 break
                 
     def update_queue_count(self, count: int):
-        self.queue_label.setText(f"キュー: {count}件")
+        """ワーカーからのキュー更新シグナルを受け取る"""
+        self.update_queue_display()
+    
+    def update_queue_display(self):
+        """キュー件数をナンバリング表示で更新"""
+        total_jobs = len(self.jobs)
+        queue_size = self.worker.jobs.qsize()
+        current_index = 0
+        
+        # 現在処理中のファイルがある場合
+        if self.worker.current_job:
+            current_index = 1
+            # 現在処理中のファイルがself.jobsの何番目か確認
+            for i, job in enumerate(self.jobs):
+                if str(job.file_path) == str(self.worker.current_job.file_path):
+                    current_index = i + 1
+                    break
+        
+        if total_jobs == 0:
+            self.queue_label.setText("キュー: 0件")
+        elif current_index > 0:
+            self.queue_label.setText(f"キュー: {current_index}件目/{total_jobs}件")
+        else:
+            self.queue_label.setText(f"キュー: {total_jobs}件")
         
     def reset_phase_progress(self):
         """Reset all phase progress bars to initial state"""
@@ -891,12 +1110,29 @@ class MainWindow(QMainWindow):
         if self.current_processing_file == file_path:
             self.stop_processing_timer()
         
+        # 処理されたジョブの設定を取得
+        job_preset = None
+        for job in self.jobs:
+            if str(job.file_path) == file_path:
+                job_preset = job.settings_preset
+                break
+        
+        # 話者分離が有効で、かつ結果にdiarizationが含まれていない場合
+        diarization_skipped = False
+        if job_preset:
+            diarization_skipped = job_preset.enable_diarization and not result.get('diarization')
+        
+        # トークンが設定されているか確認
+        import os
+        token = os.getenv("HUGGINGFACE_TOKEN")
+        has_token = bool(token)
+        
         for i in range(self.results_table.rowCount()):
             if self.results_table.item(i, 0).text() == file_name:
-                current_status = self.stage_label.text()
-                if "話者分離スキップ" in current_status:
+                if diarization_skipped:
                     self.results_table.setItem(i, 1, QTableWidgetItem("完了 (話者分離スキップ)"))
-                    if not hasattr(self, '_diarization_warning_shown'):
+                    # トークンが設定されていない場合のみメッセージを表示
+                    if not has_token and not hasattr(self, '_diarization_warning_shown'):
                         self._diarization_warning_shown = True
                         QMessageBox.information(
                             self, "話者分離について", 
@@ -916,35 +1152,46 @@ class MainWindow(QMainWindow):
                     self.results_table.setItem(i, 3, QTableWidgetItem(f"{len(csv_files)} CSVファイル"))
                 break
         
-        if not self.worker.jobs.empty():
-            try:
-                next_job = None
-                temp_jobs = []
-                while not self.worker.jobs.empty():
-                    job = self.worker.jobs.get_nowait()
-                    temp_jobs.append(job)
-                    if next_job is None:
-                        next_job = job
-                
-                for job in temp_jobs:
-                    self.worker.jobs.put(job)
-                
-                if next_job:
-                    self.start_processing_timer(str(next_job.file_path))
-            except:
-                pass  # Queue handling error, continue without timer
-                
-        if not self.worker.isRunning() and self.worker.jobs.empty():
+        # キュー表示を更新
+        self.update_queue_display()
+        
+        # ワーカースレッドが実行中で、まだキューにジョブがある場合は何もしない（自動処理される）
+        # ワーカースレッドが停止していて、キューが空の場合は完了処理
+        queue_size = self.worker.jobs.qsize()
+        
+        if queue_size == 0 and not self.worker.isRunning():
+            # すべての処理が完了
             self.start_btn.setEnabled(True)
             self.stop_btn.setEnabled(False)
             self.current_file_label.setText("すべての処理が完了しました")
             self.progress_bar.setValue(100)
             self.stage_label.setText("完了")
             self.refresh_history()
+            self.update_queue_display()
             
-            self.file_list.clear()
-            self.jobs.clear()
-            self.results_table.setRowCount(0)
+            # ファイルリストとジョブリストは保持する（クリアしない）
+            # ユーザーが手動でクリアできるようにする
+        elif queue_size > 0:
+            # まだキューにジョブが残っている
+            # 次のジョブのタイマーを開始（ワーカースレッドが自動処理する）
+            try:
+                # キューから次のジョブを確認（取り出さない）
+                temp_jobs = []
+                next_job = None
+                while not self.worker.jobs.empty():
+                    job = self.worker.jobs.get_nowait()
+                    temp_jobs.append(job)
+                    if next_job is None:
+                        next_job = job
+                
+                # ジョブを戻す
+                for job in temp_jobs:
+                    self.worker.jobs.put(job)
+                
+                if next_job:
+                    self.start_processing_timer(str(next_job.file_path))
+            except Exception as e:
+                print(f"Error checking next job: {e}")
             
     def job_failed(self, file_path: str, error: str):
         file_name = Path(file_path).name
