@@ -12,10 +12,10 @@ from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QFileDialog, QProgressBar, QListWidget,
-    QListWidgetItem, QGroupBox, QSpinBox, QLineEdit, QComboBox,
-    QTextEdit, QTabWidget, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QSplitter, QFormLayout, QCheckBox
+    QLabel, QPushButton, QFileDialog, QProgressBar, QFrame, QScrollArea,
+    QGroupBox, QSpinBox, QLineEdit, QComboBox,
+    QTabWidget, QTableWidget, QTableWidgetItem,
+    QHeaderView, QMessageBox, QCheckBox
 )
 from PySide6.QtCore import QThread, Signal, QTimer, Qt, QSettings, QUrl
 from PySide6.QtGui import QFont, QIcon, QDesktopServices
@@ -33,53 +33,43 @@ from fwhisper_batch.video_converter import VideoConverter
 
 def load_env_file():
     """Load .env file from executable directory or current directory"""
-    # PyInstallerでビルドされた場合、sys.executableはexeファイルのパス
     if getattr(sys, 'frozen', False):
-        # exeファイルと同じディレクトリから.envを読み込む
         exe_dir = Path(sys.executable).parent
         env_path = exe_dir / '.env'
         if env_path.exists():
             _load_env_with_encoding(env_path)
         else:
-            # 見つからない場合はデフォルトの動作
             _load_env_with_encoding()
     else:
-        # 通常のPython実行時
         _load_env_with_encoding()
 
 
 def _load_env_with_encoding(env_path=None):
     """複数のエンコーディングを試して.envファイルを読み込む"""
     encodings = ['utf-8', 'utf-8-sig', 'shift_jis', 'cp932']
-    
+
     for encoding in encodings:
         try:
             if env_path:
-                # ファイルを明示的に開いて読み込む
                 with open(env_path, 'r', encoding=encoding) as f:
                     load_dotenv(stream=f, override=True)
                 return
             else:
-                # デフォルトの.envファイルを読み込む
                 env_file = Path('.env')
                 if env_file.exists():
                     with open(env_file, 'r', encoding=encoding) as f:
                         load_dotenv(stream=f, override=True)
                     return
                 else:
-                    # .envファイルが存在しない場合はデフォルトの動作
                     load_dotenv()
                     return
         except (UnicodeDecodeError, UnicodeError):
             continue
-        except Exception as e:
-            # その他のエラー（ファイルが存在しないなど）は無視
+        except Exception:
             if env_path is None:
-                # .envファイルが存在しない場合はデフォルトの動作
                 load_dotenv()
             return
-    
-    # すべてのエンコーディングで失敗した場合
+
     if env_path:
         print(f"[warning] Failed to load .env file with multiple encodings: {env_path}")
     else:
@@ -131,7 +121,7 @@ class ResultsDatabase:
     def __init__(self, db_path: Path = Path.home() / ".fwhisper_results.db"):
         self.db_path = db_path
         self.init_database()
-    
+
     def init_database(self):
         conn = sqlite3.connect(self.db_path)
         conn.execute("""
@@ -153,20 +143,20 @@ class ResultsDatabase:
         """)
         conn.commit()
         conn.close()
-    
+
     def save_result(self, job: ProcessingJob) -> int:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         estimated_language = job.result.get('language', '') if job.result else ''
         audio_duration = job.result.get('duration', 0) if job.result else 0
         word_timestamps = 'あり' if job.result and job.result.get('words_count', 0) > 0 else 'なし'
         vad_settings = f"VAD: {'ON' if job.settings_preset.use_vad else 'OFF'}"
         if job.settings_preset.use_vad:
             vad_settings += f" (min_silence_ms={job.settings_preset.min_silence_ms})"
-        
+
         cursor.execute("""
-            INSERT INTO processing_results 
+            INSERT INTO processing_results
             (file_path, project_name, start_time, end_time, status, processing_time, estimated_language, audio_duration, word_timestamps, vad_settings, output_directory, error_message)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
@@ -187,16 +177,16 @@ class ResultsDatabase:
         conn.commit()
         conn.close()
         return job_id
-    
+
     def get_recent_results(self, limit: int = 50) -> List[Dict[str, Any]]:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT * FROM processing_results 
-            ORDER BY start_time DESC 
+            SELECT * FROM processing_results
+            ORDER BY start_time DESC
             LIMIT ?
         """, (limit,))
-        
+
         columns = [description[0] for description in cursor.description]
         results = [dict(zip(columns, row)) for row in cursor.fetchall()]
         conn.close()
@@ -211,7 +201,7 @@ class TranscriptionWorker(QThread):
     job_failed = Signal(str, str)
     queue_updated = Signal(int)
     diarization_skipped = Signal(str, str)  # file_path, reason
-    
+
     def __init__(self):
         super().__init__()
         self.jobs = queue.Queue()
@@ -219,21 +209,20 @@ class TranscriptionWorker(QThread):
         self.model: Optional[WhisperModel] = None
         self.should_stop = False
         self.results_db = ResultsDatabase()
-        
+
     def add_job(self, job: ProcessingJob):
         self.jobs.put(job)
         self.queue_updated.emit(self.jobs.qsize())
-        
+
     def stop_processing(self):
         self.should_stop = True
-        # キューをクリアするためにNoneを追加
         try:
             self.jobs.put_nowait(None)
         except:
             pass
-        
+
     def run(self):
-        self.should_stop = False  # リセット
+        self.should_stop = False
         while not self.should_stop:
             try:
                 job = self.jobs.get(block=True, timeout=None)
@@ -245,28 +234,28 @@ class TranscriptionWorker(QThread):
                 self.process_job(job)
                 self.jobs.task_done()
                 self.queue_updated.emit(self.jobs.qsize())
-                self.current_job = None  # ジョブ完了後にクリア
+                self.current_job = None
             except Exception as e:
                 print(f"Error in worker thread: {e}")
                 import traceback
                 traceback.print_exc()
                 self.current_job = None
                 continue
-        
+
         self.current_job = None
-        
+
     def process_job(self, job: ProcessingJob):
         try:
             import time
             job_start_time = time.time()
-            
+
             audio_file = job.file_path
             was_converted = False
             temp_audio_dir = None
-            
+
             if job.file_path.suffix.lower() != '.wav':
                 self.phase_progress_updated.emit(str(job.file_path), 0, 0.0, "WAV変換開始")
-                
+
                 try:
                     temp_audio_dir = Path(job.settings_preset.output_dir) / "converted_audio"
                     audio_file, was_converted = VideoConverter.prepare_file_for_transcription(
@@ -277,9 +266,9 @@ class TranscriptionWorker(QThread):
                     raise Exception(f"動画変換エラー: {str(e)}")
             else:
                 self.phase_progress_updated.emit(str(job.file_path), 0, 100.0, "WAV変換スキップ")
-            
+
             self.phase_progress_updated.emit(str(job.file_path), 1, 0.0, "モデル読み込み中")
-            
+
             if self.model is None:
                 device = resolve_device(job.settings_preset.device)
                 compute_type = resolve_compute_type(device, job.settings_preset.compute_type)
@@ -288,24 +277,24 @@ class TranscriptionWorker(QThread):
                     device=device,
                     compute_type=compute_type
                 )
-            
+
             output_dir = Path(job.settings_preset.output_dir) / f"output_{job.file_path.stem}"
             output_dir.mkdir(parents=True, exist_ok=True)
-            
+
             self.phase_progress_updated.emit(str(job.file_path), 1, 0.0, "文字起こし開始")
-            
+
             def transcription_progress_callback(progress: float):
                 self.phase_progress_updated.emit(str(job.file_path), 1, progress, "文字起こし中")
-            
+
             result = self._transcribe_with_progress(
                 job, audio_file, output_dir, transcription_progress_callback
             )
-            
+
             self.phase_progress_updated.emit(str(job.file_path), 1, 100.0, "文字起こし完了")
-            
+
             if job.settings_preset.enable_diarization:
                 self.phase_progress_updated.emit(str(job.file_path), 2, 0.0, "話者分離開始")
-                
+
                 diarization_result = self._perform_diarization(job, audio_file, output_dir, result)
                 if diarization_result:
                     result["diarization"] = diarization_result
@@ -314,31 +303,30 @@ class TranscriptionWorker(QThread):
                     self.phase_progress_updated.emit(str(job.file_path), 2, 100.0, "話者分離スキップ")
             else:
                 self.phase_progress_updated.emit(str(job.file_path), 2, 100.0, "話者分離無効")
-            
+
             self.phase_progress_updated.emit(str(job.file_path), 3, 0.0, "CSV変換開始")
             self._convert_to_csv(output_dir, job.file_path.stem, result)
             self.phase_progress_updated.emit(str(job.file_path), 3, 100.0, "CSV変換完了")
-            
+
             job.result = result
-            
+
             if job.settings_preset.enable_diarization and not result.get('diarization'):
                 job.status = "完了 (話者分離スキップ)"
                 self.progress_updated.emit(str(job.file_path), 100.0, "完了 (話者分離スキップ)")
             else:
                 job.status = "完了"
                 self.progress_updated.emit(str(job.file_path), 100.0, "完了")
-                
+
             job.job_id = self.results_db.save_result(job)
             self.job_completed.emit(str(job.file_path), result)
-            
+
         except Exception as e:
             job.error = str(e)
             job.status = "エラー"
             job.job_id = self.results_db.save_result(job)
             self.job_failed.emit(str(job.file_path), str(e))
-            
+
     def _transcribe_with_progress(self, job: ProcessingJob, audio_file: Path, output_dir: Path, progress_callback):
-        """Perform transcription with progress callback"""
         return transcribe_one_with_callback(
             self.model,
             audio_file,
@@ -351,95 +339,90 @@ class TranscriptionWorker(QThread):
             show_progress=False,
             progress_callback=progress_callback
         )
-    
+
     def _perform_diarization(self, job: ProcessingJob, audio_file: Path, output_dir: Path, transcription_result: Dict[str, Any]):
-        """Perform speaker diarization with detailed progress tracking"""
         if not job.settings_preset.enable_diarization:
             return None
-            
+
         try:
             import time
             import os
-            
-            # トークンの有無を確認
+
             token = os.getenv("HUGGINGFACE_TOKEN")
             has_token = bool(token)
-            
+
             self.phase_progress_updated.emit(str(job.file_path), 2, 10.0, "話者分離モデル読み込み中")
-            time.sleep(0.1)  # Small delay to show progress
-            
+            time.sleep(0.1)
+
             words_file = output_dir / f"{audio_file.stem}_words.csv"
             segments_file = output_dir / f"{audio_file.stem}_segments.csv"
-            
-            # ファイル存在チェック（詳細なエラーメッセージ付き）
+
             missing_files = []
             if not words_file.exists():
                 missing_files.append(f"words.csv ({words_file})")
             if not segments_file.exists():
                 missing_files.append(f"segments.csv ({segments_file})")
-            
+
             if missing_files:
                 error_msg = f"話者分離に必要なファイルが見つかりません:\n" + "\n".join(f"  - {f}" for f in missing_files)
                 print(f"[warning] {error_msg}")
-                print(f"[warning] 文字起こしが正常に完了していない可能性があります。")
                 return None
-            
-            # ファイルが空でないか確認
+
             if words_file.stat().st_size == 0:
-                print(f"[warning] {words_file} が空です。単語タイムスタンプが生成されていない可能性があります。")
+                print(f"[warning] {words_file} が空です。")
                 return None
-            
+
             self.phase_progress_updated.emit(str(job.file_path), 2, 30.0, "音声データ解析中")
-            
+
             words_df = pd.read_csv(words_file, encoding='utf-8-sig')
             words = words_df.to_dict('records')
-            
+
             if not words:
-                print(f"[warning] {words_file} に単語データが含まれていません。話者分離をスキップします。")
+                print(f"[warning] {words_file} に単語データが含まれていません。")
                 return None
-            
+
             segments_df = pd.read_csv(segments_file, encoding='utf-8-sig')
             segments = segments_df.to_dict('records')
-            
+
             if not segments:
-                print(f"[warning] {segments_file} にセグメントデータが含まれていません。話者分離をスキップします。")
+                print(f"[warning] {segments_file} にセグメントデータが含まれていません。")
                 return None
-            
+
             self.phase_progress_updated.emit(str(job.file_path), 2, 55.0, "話者埋め込み抽出中")
-            
+
             config = asdict(job.settings_preset)
-            
+
             self.phase_progress_updated.emit(str(job.file_path), 2, 80.0, "話者クラスタリング中")
-            
+
             result = diarize_and_merge(audio_file, output_dir, config, words, segments)
-            
+
             self.phase_progress_updated.emit(str(job.file_path), 2, 95.0, "話者ラベル統合中")
-            
-            # エラーメッセージの改善
+
             if not result:
                 if not has_token:
-                    reason = "HUGGINGFACE_TOKENが設定されていないか、モデルがローカルキャッシュにありません。\n解決方法: .envファイルにHUGGINGFACE_TOKENを設定してください。"
-                    print(f"[warning] 話者分離がスキップされました。")
-                    print(f"[warning] 原因: {reason}")
+                    reason = "HUGGINGFACE_TOKENが設定されていないか、モデルがローカルキャッシュにありません。"
                 else:
-                    reason = "話者分離処理中にエラーが発生した可能性があります。\n詳細はコンソール出力を確認してください。"
-                    print(f"[warning] 話者分離がスキップされました。")
-                    print(f"[warning] 原因: {reason}")
-                
-                # GUIに通知
+                    reason = "話者分離処理中にエラーが発生した可能性があります。"
+                print(f"[warning] 話者分離がスキップされました。原因: {reason}")
                 self.diarization_skipped.emit(str(job.file_path), reason)
-            
+
             return result
-            
+
         except Exception as e:
-            error_msg = f"話者分離処理中にエラーが発生しました: {str(e)}"
-            print(f"[error] {error_msg}")
+            error_msg = str(e)
+            print(f"[warning] 話者分離がスキップされました。")
+            print(f"[warning] エラー詳細: {error_msg}")
+            import os
+            token = os.getenv("HUGGINGFACE_TOKEN")
+            if token:
+                print(f"[warning] トークンは設定されていますが、認証に失敗した可能性があります。")
             import traceback
+            print(f"[warning] 詳細なスタックトレース:")
             traceback.print_exc()
+            self.diarization_skipped.emit(str(job.file_path), error_msg)
             return None
-    
+
     def _convert_to_csv(self, output_dir: Path, stem: str, result: Dict[str, Any]):
-        # CSV files are already generated by transcribe_batch and diarize_and_merge
         pass
 
 
@@ -448,12 +431,12 @@ class SettingsManager:
         self.settings = QSettings("FWhisper", "BatchGUI")
         self.presets_dir = Path.home() / ".fwhisper_presets"
         self.presets_dir.mkdir(exist_ok=True)
-        
+
     def save_preset(self, preset: SettingsPreset):
         preset_file = self.presets_dir / f"{preset.name}.json"
         with open(preset_file, 'w', encoding='utf-8') as f:
             json.dump(asdict(preset), f, indent=2, ensure_ascii=False)
-            
+
     def load_preset(self, name: str) -> Optional[SettingsPreset]:
         preset_file = self.presets_dir / f"{name}.json"
         if preset_file.exists():
@@ -461,71 +444,178 @@ class SettingsManager:
                 data = json.load(f)
                 return SettingsPreset(**data)
         return None
-        
+
     def list_presets(self) -> List[str]:
         return [f.stem for f in self.presets_dir.glob("*.json")]
-        
+
     def delete_preset(self, name: str):
         preset_file = self.presets_dir / f"{name}.json"
         if preset_file.exists():
             preset_file.unlink()
 
 
+class FileProgressWidget(QFrame):
+    """1ファイルの処理進捗を表示するウィジェット"""
+    remove_requested = Signal(str)  # file_path
+
+    def __init__(self, file_path: str, parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+        self.setFrameStyle(QFrame.StyledPanel)
+        self.setMaximumHeight(54)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(10)
+
+        self.name_label = QLabel(Path(self.file_path).name)
+        self.name_label.setMinimumWidth(180)
+        self.name_label.setMaximumWidth(260)
+        self.name_label.setToolTip(self.file_path)
+
+        self.status_badge = QLabel("準備完了")
+        self.status_badge.setMinimumWidth(160)
+        self.status_badge.setMaximumWidth(190)
+        self.status_badge.setAlignment(Qt.AlignCenter)
+        self.status_badge.setStyleSheet(
+            "border: 1px solid #ccc; border-radius: 3px; padding: 2px 6px; color: #666;"
+        )
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(14)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet(
+            "QProgressBar { border: 1px solid #ddd; border-radius: 3px; background: #f5f5f5; }"
+            "QProgressBar::chunk { background-color: #2196F3; border-radius: 2px; }"
+        )
+
+        self.time_label = QLabel("")
+        self.time_label.setMinimumWidth(70)
+        self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.time_label.setStyleSheet("color: #888; font-size: 11px;")
+
+        self.remove_btn = QPushButton("×")
+        self.remove_btn.setFixedSize(28, 28)
+        self.remove_btn.setStyleSheet(
+            "QPushButton { color: #999; border: 1px solid #ddd; border-radius: 3px; background: white; }"
+            "QPushButton:hover:enabled { color: #f44336; border-color: #f44336; }"
+            "QPushButton:disabled { color: #ccc; }"
+        )
+        self.remove_btn.clicked.connect(lambda: self.remove_requested.emit(self.file_path))
+
+        layout.addWidget(self.name_label)
+        layout.addWidget(self.status_badge)
+        layout.addWidget(self.progress_bar, 1)
+        layout.addWidget(self.time_label)
+        layout.addWidget(self.remove_btn)
+
+    def update_phase(self, phase_index: int, progress: float, phase_name: str):
+        overall = int((phase_index * 100 + progress) / 4)
+        self.progress_bar.setValue(overall)
+        self.status_badge.setText(phase_name)
+        self.status_badge.setStyleSheet(
+            "border: 1px solid #1976D2; border-radius: 3px; padding: 2px 6px; "
+            "color: #1976D2; background: #E3F2FD; font-weight: bold;"
+        )
+        self.remove_btn.setEnabled(False)
+
+    def update_time(self, elapsed: float):
+        self.time_label.setText(f"{elapsed:.1f}秒")
+
+    def set_completed(self, time_str: str, diarization_skipped: bool = False):
+        self.progress_bar.setValue(100)
+        self.progress_bar.setStyleSheet(
+            "QProgressBar { border: 1px solid #ddd; border-radius: 3px; background: #f5f5f5; }"
+            "QProgressBar::chunk { background-color: #4CAF50; border-radius: 2px; }"
+        )
+        if diarization_skipped:
+            self.status_badge.setText("完了 (話者分離省略)")
+            self.status_badge.setStyleSheet(
+                "border: 1px solid #F57C00; border-radius: 3px; padding: 2px 6px; "
+                "color: #F57C00; background: #FFF3E0; font-weight: bold;"
+            )
+        else:
+            self.status_badge.setText("完了")
+            self.status_badge.setStyleSheet(
+                "border: 1px solid #388E3C; border-radius: 3px; padding: 2px 6px; "
+                "color: #388E3C; background: #E8F5E9; font-weight: bold;"
+            )
+        self.time_label.setText(time_str)
+        self.remove_btn.setEnabled(True)
+
+    def set_error(self, error: str = ""):
+        self.status_badge.setText("エラー")
+        self.status_badge.setStyleSheet(
+            "border: 1px solid #D32F2F; border-radius: 3px; padding: 2px 6px; "
+            "color: #D32F2F; background: #FFEBEE; font-weight: bold;"
+        )
+        self.status_badge.setToolTip(error)
+        self.progress_bar.setStyleSheet(
+            "QProgressBar { border: 1px solid #ddd; border-radius: 3px; background: #f5f5f5; }"
+            "QProgressBar::chunk { background-color: #f44336; border-radius: 2px; }"
+        )
+        self.remove_btn.setEnabled(True)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         load_env_file()
-        
+
         self.settings_manager = SettingsManager()
         self.worker = TranscriptionWorker()
         self.current_preset = SettingsPreset(name="デフォルト")
         self.jobs: List[ProcessingJob] = []
         self.results_db = ResultsDatabase()
-        
+        self.file_widgets: Dict[str, FileProgressWidget] = {}
+
         self.processing_timer = QTimer()
         self.processing_timer.timeout.connect(self.update_processing_time)
         self.current_processing_file = None
         self.processing_start_time = None
-        
+
         self.setup_ui()
         self.setup_connections()
         self.load_last_preset()
-        
+
     def setup_ui(self):
-        self.setWindowTitle("FWhisper Batch GUI v2 - 音声文字起こし & 話者分離")
-        self.setGeometry(100, 100, 1400, 900)
-        
+        self.setWindowTitle("KoeScribe - 音声文字起こし & 話者分離")
+        self.setGeometry(100, 100, 1200, 800)
+
         icon_path = Path(__file__).parent.parent.parent / "app_icon.png"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
-        
+
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
+
         main_layout = QHBoxLayout(central_widget)
-        
+
+        # ── 左パネル（設定） ──
         left_panel = QWidget()
         left_panel.setMaximumWidth(400)
         left_layout = QVBoxLayout(left_panel)
-        
+
         settings_group = QGroupBox("設定")
         settings_layout = QVBoxLayout(settings_group)
-        
+
         preset_row = QHBoxLayout()
         self.preset_combo = QComboBox()
         self.preset_combo.setEditable(True)
         preset_row.addWidget(QLabel("プリセット:"))
         preset_row.addWidget(self.preset_combo)
         settings_layout.addLayout(preset_row)
-        
+
         load_button_row = QHBoxLayout()
         self.load_preset_btn = QPushButton("読み込み")
         load_button_row.addWidget(self.load_preset_btn)
         load_button_row.addStretch()
         settings_layout.addLayout(load_button_row)
-        
+
         model_row = QHBoxLayout()
-        
         self.model_combo = QComboBox()
         self.model_combo.addItems(["tiny", "base", "small", "medium", "large-v3"])
         self.model_combo.setCurrentText("large-v3")
@@ -533,7 +623,7 @@ class MainWindow(QMainWindow):
         model_row.addWidget(self.model_combo)
         model_row.addWidget(self.create_help_button("model_size"))
         settings_layout.addLayout(model_row)
-        
+
         lang_row = QHBoxLayout()
         self.language_combo = QComboBox()
         self.language_combo.addItems(["ja", "en", "auto"])
@@ -541,7 +631,7 @@ class MainWindow(QMainWindow):
         lang_row.addWidget(QLabel("言語:"))
         lang_row.addWidget(self.language_combo)
         settings_layout.addLayout(lang_row)
-        
+
         device_row = QHBoxLayout()
         self.device_combo = QComboBox()
         self.device_combo.addItems(["auto", "cuda", "cpu"])
@@ -549,7 +639,7 @@ class MainWindow(QMainWindow):
         device_row.addWidget(QLabel("デバイス:"))
         device_row.addWidget(self.device_combo)
         settings_layout.addLayout(device_row)
-        
+
         compute_row = QHBoxLayout()
         self.compute_combo = QComboBox()
         self.compute_combo.addItems(["auto", "float16", "int8_float16", "int8"])
@@ -558,7 +648,7 @@ class MainWindow(QMainWindow):
         compute_row.addWidget(self.compute_combo)
         compute_row.addWidget(self.create_help_button("compute_type"))
         settings_layout.addLayout(compute_row)
-        
+
         beam_row = QHBoxLayout()
         self.beam_size_spin = QSpinBox()
         self.beam_size_spin.setRange(1, 20)
@@ -567,13 +657,13 @@ class MainWindow(QMainWindow):
         beam_row.addWidget(self.beam_size_spin)
         beam_row.addWidget(self.create_help_button("beam_size"))
         settings_layout.addLayout(beam_row)
-        
+
         vad_row = QHBoxLayout()
         self.vad_check = QCheckBox("VAD使用")
         self.vad_check.setChecked(True)
         vad_row.addWidget(self.vad_check)
         settings_layout.addLayout(vad_row)
-        
+
         silence_row = QHBoxLayout()
         self.min_silence_spin = QSpinBox()
         self.min_silence_spin.setRange(100, 2000)
@@ -583,13 +673,13 @@ class MainWindow(QMainWindow):
         silence_row.addWidget(self.min_silence_spin)
         silence_row.addWidget(self.create_help_button("min_silence_ms"))
         settings_layout.addLayout(silence_row)
-        
+
         diarize_row = QHBoxLayout()
         self.diarization_check = QCheckBox("話者分離")
         self.diarization_check.setChecked(True)
         diarize_row.addWidget(self.diarization_check)
         settings_layout.addLayout(diarize_row)
-        
+
         speakers_row = QHBoxLayout()
         self.max_speakers_spin = QSpinBox()
         self.max_speakers_spin.setRange(1, 20)
@@ -598,9 +688,7 @@ class MainWindow(QMainWindow):
         speakers_row.addWidget(self.max_speakers_spin)
         speakers_row.addWidget(self.create_help_button("max_speakers"))
         settings_layout.addLayout(speakers_row)
-        
-        left_layout.addWidget(settings_group)
-        
+
         output_dir_layout = QHBoxLayout()
         self.output_dir_edit = QLineEdit("./outputs")
         self.output_dir_btn = QPushButton("参照")
@@ -608,7 +696,7 @@ class MainWindow(QMainWindow):
         output_dir_layout.addWidget(self.output_dir_edit)
         output_dir_layout.addWidget(self.output_dir_btn)
         settings_layout.addLayout(output_dir_layout)
-        
+
         save_delete_row = QHBoxLayout()
         self.save_preset_btn = QPushButton("保存")
         self.delete_preset_btn = QPushButton("削除")
@@ -616,145 +704,94 @@ class MainWindow(QMainWindow):
         save_delete_row.addWidget(self.delete_preset_btn)
         save_delete_row.addStretch()
         settings_layout.addLayout(save_delete_row)
-        
+
         left_layout.addWidget(settings_group)
-        
+        left_layout.addStretch()
         main_layout.addWidget(left_panel)
-        
+
+        # ── 右パネル ──
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
-        
+
         self.tab_widget = QTabWidget()
-        
+
+        # 処理タブ
         processing_tab = QWidget()
         processing_layout = QVBoxLayout(processing_tab)
-        
-        file_group = QGroupBox("ファイル選択")
-        file_layout = QVBoxLayout(file_group)
-        
-        file_buttons = QHBoxLayout()
+        processing_layout.setSpacing(8)
+
+        # ファイル操作バー
+        file_ctrl_bar = QHBoxLayout()
         self.add_files_btn = QPushButton("ファイル追加")
         self.add_folder_btn = QPushButton("フォルダ追加")
-        self.clear_files_btn = QPushButton("クリア")
-        file_buttons.addWidget(self.add_files_btn)
-        file_buttons.addWidget(self.add_folder_btn)
-        file_buttons.addWidget(self.clear_files_btn)
-        file_layout.addLayout(file_buttons)
-        
-        self.file_list = QListWidget()
-        file_layout.addWidget(self.file_list)
-        
-        processing_layout.addWidget(file_group)
-        
-        progress_group = QGroupBox("処理状況")
-        progress_layout = QVBoxLayout(progress_group)
-        
-        self.current_file_label = QLabel("待機中")
-        progress_layout.addWidget(self.current_file_label)
-        
-        phase0_layout = QHBoxLayout()
-        self.phase0_label = QLabel("0. WAV変換:")
-        self.phase0_progress = QProgressBar()
-        self.phase0_status = QLabel("待機中")
-        phase0_layout.addWidget(self.phase0_label)
-        phase0_layout.addWidget(self.phase0_progress)
-        phase0_layout.addWidget(self.phase0_status)
-        progress_layout.addLayout(phase0_layout)
-        
-        phase1_layout = QHBoxLayout()
-        self.phase1_label = QLabel("1. 文字起こし:")
-        self.phase1_progress = QProgressBar()
-        self.phase1_status = QLabel("待機中")
-        phase1_layout.addWidget(self.phase1_label)
-        phase1_layout.addWidget(self.phase1_progress)
-        phase1_layout.addWidget(self.phase1_status)
-        progress_layout.addLayout(phase1_layout)
-        
-        phase2_layout = QHBoxLayout()
-        self.phase2_label = QLabel("2. 話者分離:")
-        self.phase2_progress = QProgressBar()
-        self.phase2_status = QLabel("待機中")
-        phase2_layout.addWidget(self.phase2_label)
-        phase2_layout.addWidget(self.phase2_progress)
-        phase2_layout.addWidget(self.phase2_status)
-        progress_layout.addLayout(phase2_layout)
-        
-        phase3_layout = QHBoxLayout()
-        self.phase3_label = QLabel("3. マージ・CSV変換:")
-        self.phase3_progress = QProgressBar()
-        self.phase3_status = QLabel("待機中")
-        phase3_layout.addWidget(self.phase3_label)
-        phase3_layout.addWidget(self.phase3_progress)
-        phase3_layout.addWidget(self.phase3_status)
-        progress_layout.addLayout(phase3_layout)
-        
-        overall_layout = QHBoxLayout()
-        overall_layout.addWidget(QLabel("全体進捗:"))
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid #cccccc;
-                border-radius: 5px;
-                text-align: center;
-                font-weight: bold;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-                border-radius: 3px;
-            }
-        """)
-        overall_layout.addWidget(self.progress_bar)
-        progress_layout.addLayout(overall_layout)
-        
-        # ステータス情報を整理
-        status_layout = QHBoxLayout()
-        self.stage_label = QLabel("")
-        self.stage_label.setStyleSheet("font-weight: bold; color: #2196F3;")
-        self.queue_label = QLabel("キュー: 0件")
+        self.open_output_btn = QPushButton("出力フォルダを開く")
+        self.queue_label = QLabel("0件")
         self.queue_label.setStyleSheet("font-weight: bold; color: #666;")
-        status_layout.addWidget(self.stage_label)
-        status_layout.addStretch()
-        status_layout.addWidget(self.queue_label)
-        progress_layout.addLayout(status_layout)
-        
-        control_buttons = QHBoxLayout()
+        file_ctrl_bar.addWidget(self.add_files_btn)
+        file_ctrl_bar.addWidget(self.add_folder_btn)
+        file_ctrl_bar.addWidget(self.open_output_btn)
+        file_ctrl_bar.addStretch()
+        file_ctrl_bar.addWidget(self.queue_label)
+        processing_layout.addLayout(file_ctrl_bar)
+
+        # ファイルキュー（スクロールエリア）
+        self.files_scroll = QScrollArea()
+        self.files_scroll.setWidgetResizable(True)
+        self.files_scroll.setFrameShape(QFrame.StyledPanel)
+
+        self.files_container = QWidget()
+        self.files_layout = QVBoxLayout(self.files_container)
+        self.files_layout.setAlignment(Qt.AlignTop)
+        self.files_layout.setSpacing(4)
+        self.files_layout.setContentsMargins(4, 4, 4, 4)
+
+        self.no_files_label = QLabel(
+            "ファイルをドラッグ&ドロップするか\n「ファイル追加」ボタンで追加してください"
+        )
+        self.no_files_label.setAlignment(Qt.AlignCenter)
+        self.no_files_label.setStyleSheet("color: #bbb; padding: 40px; font-size: 13px;")
+        self.files_layout.addWidget(self.no_files_label)
+
+        self.files_scroll.setWidget(self.files_container)
+        processing_layout.addWidget(self.files_scroll)
+
+        # 処理開始/停止ボタン
+        bottom_bar = QHBoxLayout()
         self.start_btn = QPushButton("処理開始")
-        self.start_btn.setEnabled(False)  # 初期状態では無効
+        self.start_btn.setEnabled(False)
+        self.start_btn.setMinimumHeight(36)
+        self.start_btn.setStyleSheet(
+            "QPushButton:enabled { background-color: #4CAF50; color: white; font-weight: bold; font-size: 13px; border-radius: 4px; }"
+            "QPushButton:disabled { background-color: #ccc; color: #888; border-radius: 4px; }"
+        )
         self.stop_btn = QPushButton("停止")
         self.stop_btn.setEnabled(False)
-        control_buttons.addWidget(self.start_btn)
-        control_buttons.addWidget(self.stop_btn)
-        progress_layout.addLayout(control_buttons)
-        
-        processing_layout.addWidget(progress_group)
-        
-        results_group = QGroupBox("処理結果")
-        results_layout = QVBoxLayout(results_group)
-        
-        results_buttons = QHBoxLayout()
-        self.open_output_btn = QPushButton("📁 出力フォルダを開く")
-        results_buttons.addWidget(self.open_output_btn)
-        results_buttons.addStretch()
-        results_layout.addLayout(results_buttons)
-        
-        self.results_table = QTableWidget()
-        self.results_table.setColumnCount(4)
-        self.results_table.setHorizontalHeaderLabels(["ファイル名", "状態", "処理時間", "出力"])
-        
-        self.results_table.setColumnWidth(0, 200)  # ファイル名
-        self.results_table.setColumnWidth(1, 150)  # 状態（幅を広げる）
-        self.results_table.setColumnWidth(2, 100)  # 処理時間
-        self.results_table.horizontalHeader().setStretchLastSection(True)  # 出力列は残りスペースを使用
-        
-        results_layout.addWidget(self.results_table)
-        
-        processing_layout.addWidget(results_group)
-        
+        self.stop_btn.setMinimumHeight(36)
+        self.stop_btn.setStyleSheet(
+            "QPushButton:enabled { background-color: #f44336; color: white; font-weight: bold; border-radius: 4px; }"
+            "QPushButton:disabled { background-color: #ccc; color: #888; border-radius: 4px; }"
+        )
+        bottom_bar.addStretch()
+        bottom_bar.addWidget(self.start_btn)
+        bottom_bar.addWidget(self.stop_btn)
+        processing_layout.addLayout(bottom_bar)
+
+        # 別ファイル処理ボタン（処理完了後に表示）
+        self.new_session_btn = QPushButton("別のファイルを処理する")
+        self.new_session_btn.setVisible(False)
+        self.new_session_btn.setMinimumHeight(40)
+        self.new_session_btn.setStyleSheet(
+            "background-color: #2196F3; color: white; font-size: 13px; "
+            "font-weight: bold; border-radius: 4px; padding: 6px 20px;"
+        )
+        processing_layout.addWidget(self.new_session_btn)
+
         self.tab_widget.addTab(processing_tab, "処理")
-        
+
+        # 履歴タブ
         history_tab = QWidget()
         history_layout = QVBoxLayout(history_tab)
-        
+
         history_buttons = QHBoxLayout()
         self.refresh_history_btn = QPushButton("履歴更新")
         self.clear_history_btn = QPushButton("履歴クリア")
@@ -762,29 +799,25 @@ class MainWindow(QMainWindow):
         history_buttons.addWidget(self.clear_history_btn)
         history_buttons.addStretch()
         history_layout.addLayout(history_buttons)
-        
+
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(7)
         self.history_table.setHorizontalHeaderLabels(["ファイル名", "プリセット", "開始時刻", "状態", "処理時間", "言語", "音声長"])
-        
-        self.history_table.setColumnWidth(0, 140)  # ファイル名
-        self.history_table.setColumnWidth(1, 100)  # プリセット
-        self.history_table.setColumnWidth(2, 130)  # 開始時刻
-        self.history_table.setColumnWidth(3, 100)  # 状態
-        self.history_table.setColumnWidth(4, 80)   # 処理時間
-        self.history_table.setColumnWidth(5, 60)   # 言語
-        self.history_table.horizontalHeader().setStretchLastSection(True)  # 音声長列は残りスペースを使用
-        
+        self.history_table.setColumnWidth(0, 140)
+        self.history_table.setColumnWidth(1, 100)
+        self.history_table.setColumnWidth(2, 130)
+        self.history_table.setColumnWidth(3, 100)
+        self.history_table.setColumnWidth(4, 80)
+        self.history_table.setColumnWidth(5, 60)
+        self.history_table.horizontalHeader().setStretchLastSection(True)
         history_layout.addWidget(self.history_table)
-        
+
         self.tab_widget.addTab(history_tab, "履歴")
-        
+
         right_layout.addWidget(self.tab_widget)
-        
         main_layout.addWidget(right_panel)
-        
+
     def create_help_button(self, help_key):
-        """Create a help button for settings"""
         help_btn = QPushButton("?")
         help_btn.setFixedSize(20, 20)
         help_btn.setToolTip(HELP_TOOLTIPS.get(help_key, ""))
@@ -792,22 +825,21 @@ class MainWindow(QMainWindow):
             self, "ヘルプ", HELP_TOOLTIPS.get(help_key, "情報がありません")
         ))
         return help_btn
-        
+
     def setup_connections(self):
         self.save_preset_btn.clicked.connect(self.save_preset)
         self.load_preset_btn.clicked.connect(self.load_preset)
         self.delete_preset_btn.clicked.connect(self.delete_preset)
-        
+
         self.add_files_btn.clicked.connect(self.add_files)
         self.add_folder_btn.clicked.connect(self.add_folder)
-        self.clear_files_btn.clicked.connect(self.clear_files)
-        
         self.output_dir_btn.clicked.connect(self.select_output_dir)
         self.open_output_btn.clicked.connect(self.open_output_directory)
-        
+
         self.start_btn.clicked.connect(self.start_processing)
         self.stop_btn.clicked.connect(self.stop_processing)
-        
+        self.new_session_btn.clicked.connect(self.reset_for_new_session)
+
         self.worker.progress_updated.connect(self.update_progress)
         self.worker.phase_progress_updated.connect(self.update_phase_progress)
         self.worker.timer_updated.connect(self.update_timer_display)
@@ -815,12 +847,12 @@ class MainWindow(QMainWindow):
         self.worker.job_failed.connect(self.job_failed)
         self.worker.queue_updated.connect(self.update_queue_count)
         self.worker.diarization_skipped.connect(self.on_diarization_skipped)
-        
+
         self.refresh_history_btn.clicked.connect(self.refresh_history)
         self.clear_history_btn.clicked.connect(self.clear_history)
-        
+
         self.refresh_preset_list()
-        
+
     def refresh_preset_list(self):
         current_text = self.preset_combo.currentText()
         self.preset_combo.clear()
@@ -828,7 +860,7 @@ class MainWindow(QMainWindow):
         self.preset_combo.addItems(presets)
         if current_text:
             self.preset_combo.setCurrentText(current_text)
-            
+
     def save_preset(self):
         preset = self.get_current_preset()
         if preset.name.strip():
@@ -837,7 +869,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "保存完了", f"設定プリセット '{preset.name}' を保存しました。")
         else:
             QMessageBox.warning(self, "エラー", "プリセット名を入力してください。")
-            
+
     def load_preset(self):
         name = self.preset_combo.currentText().strip()
         if name:
@@ -847,7 +879,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "読み込み完了", f"設定プリセット '{name}' を読み込みました。")
             else:
                 QMessageBox.warning(self, "エラー", f"設定プリセット '{name}' が見つかりません。")
-                
+
     def delete_preset(self):
         name = self.preset_combo.currentText().strip()
         if name:
@@ -859,7 +891,7 @@ class MainWindow(QMainWindow):
                 self.settings_manager.delete_preset(name)
                 self.refresh_preset_list()
                 QMessageBox.information(self, "削除完了", f"設定プリセット '{name}' を削除しました。")
-                
+
     def get_current_preset(self) -> SettingsPreset:
         return SettingsPreset(
             name=self.preset_combo.currentText().strip(),
@@ -874,7 +906,7 @@ class MainWindow(QMainWindow):
             max_speakers=self.max_speakers_spin.value(),
             output_dir=self.output_dir_edit.text()
         )
-        
+
     def apply_preset(self, preset: SettingsPreset):
         self.model_combo.setCurrentText(preset.model_size)
         self.language_combo.setCurrentText(preset.language)
@@ -886,332 +918,234 @@ class MainWindow(QMainWindow):
         self.diarization_check.setChecked(preset.enable_diarization)
         self.max_speakers_spin.setValue(preset.max_speakers)
         self.output_dir_edit.setText(preset.output_dir)
-        
+
     def load_last_preset(self):
+        # まず「デフォルト」を試し、なければ一番最初のプリセットを読み込む
         default_preset = self.settings_manager.load_preset("デフォルト")
         if default_preset:
             self.apply_preset(default_preset)
-            
+            return
+        presets = self.settings_manager.list_presets()
+        if presets:
+            first_preset = self.settings_manager.load_preset(presets[0])
+            if first_preset:
+                self.apply_preset(first_preset)
+                self.preset_combo.setCurrentText(presets[0])
+
+    def _add_file_widget(self, file_path: str):
+        """ファイルウィジェットをスクロールエリアに追加"""
+        if file_path in self.file_widgets:
+            return
+
+        # 「ファイルなし」ラベルを非表示
+        self.no_files_label.setVisible(False)
+
+        widget = FileProgressWidget(file_path)
+        widget.remove_requested.connect(self.remove_file_widget)
+        self.files_layout.addWidget(widget)
+        self.file_widgets[file_path] = widget
+
+    def remove_file_widget(self, file_path: str):
+        """ファイルウィジェットを削除"""
+        if file_path not in self.file_widgets:
+            return
+
+        widget = self.file_widgets.pop(file_path)
+        self.files_layout.removeWidget(widget)
+        widget.deleteLater()
+
+        # ジョブリストからも削除
+        self.jobs = [j for j in self.jobs if str(j.file_path) != file_path]
+
+        # ファイルが0件になったら「ファイルなし」ラベルを表示
+        if not self.file_widgets:
+            self.no_files_label.setVisible(True)
+            self.start_btn.setEnabled(False)
+
+        self.update_queue_display()
+
     def add_files_to_queue(self, file_paths: List[Path], add_to_list: bool = True):
-        """ファイルをキューに追加する共通処理"""
         preset = self.get_current_preset()
         added_count = 0
         skipped_count = 0
-        
-        # 既にキューに追加されているファイルパスを取得
-        existing_paths = set()
-        for job in self.jobs:
-            existing_paths.add(str(job.file_path))
-        
-        # 現在処理中のファイルもチェック
+
+        existing_paths = set(str(j.file_path) for j in self.jobs)
         if self.worker.current_job:
             existing_paths.add(str(self.worker.current_job.file_path))
-        
-        # ワーカーのキュー内のファイルパスもチェック（処理中の場合）
-        if self.worker.isRunning():
-            temp_jobs = []
-            while not self.worker.jobs.empty():
-                try:
-                    job = self.worker.jobs.get_nowait()
-                    temp_jobs.append(job)
-                    existing_paths.add(str(job.file_path))
-                except queue.Empty:
-                    break
-                except Exception:
-                    break
-            
-            # 一時的に取り出したジョブを戻す
-            for job in temp_jobs:
-                self.worker.jobs.put(job)
-        
+
         for file_path in file_paths:
             file_path_str = str(file_path)
-            
-            # 既にキューに追加されているかチェック
+
             if file_path_str in existing_paths:
                 skipped_count += 1
                 continue
-            
-            # ファイルリストに追加
-            if add_to_list:
-                item = QListWidgetItem(file_path_str)
-                self.file_list.addItem(item)
-            
-            # ジョブを作成（ワーカーのキューには追加しない）
+
             job = ProcessingJob(file_path, preset)
             self.jobs.append(job)
-            # ワーカーのキューには追加しない（処理開始時に追加）
             existing_paths.add(file_path_str)
+
+            if add_to_list:
+                self._add_file_widget(file_path_str)
+
             added_count += 1
-            
-            # 結果テーブルに行を追加
-            row = self.results_table.rowCount()
-            self.results_table.insertRow(row)
-            self.results_table.setItem(row, 0, QTableWidgetItem(file_path.name))
-            self.results_table.setItem(row, 1, QTableWidgetItem("待機中"))
-            self.results_table.setItem(row, 2, QTableWidgetItem(""))
-            self.results_table.setItem(row, 3, QTableWidgetItem(""))
-        
-        # ファイル追加時は自動で処理を開始しない
-        # 処理開始ボタンを有効化
+
         if added_count > 0:
             self.start_btn.setEnabled(True)
+            self.new_session_btn.setVisible(False)
             self.update_queue_display()
-        
+
         return added_count, skipped_count
-    
+
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(
             self, "音声・動画ファイルを選択",
             "", "Media Files (*.wav *.mp4 *.mkv *.avi *.mov *.flv *.wmv *.webm *.m4v *.mp3 *.m4a *.flac *.ogg);;All Files (*.*)"
         )
-        
+
         if files:
             file_paths = [Path(f) for f in files]
             added, skipped = self.add_files_to_queue(file_paths, add_to_list=True)
-            
+
             if skipped > 0:
                 QMessageBox.information(
                     self, "ファイル追加",
-                    f"{added}件のファイルをキューに追加しました。\n{skipped}件のファイルは既にキューに含まれています。"
+                    f"{added}件のファイルを追加しました。\n{skipped}件は既に追加済みです。"
                 )
-            elif added > 0:
-                QMessageBox.information(
-                    self, "ファイル追加",
-                    f"{added}件のファイルをキューに追加しました。"
-                )
-                
+
     def add_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "フォルダを選択")
         if folder:
             folder_path = Path(folder)
             extensions = ['.wav', '.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.m4v', '.mp3', '.m4a', '.flac', '.ogg']
-            
+
             file_paths = []
             for ext in extensions:
                 for file_path in folder_path.glob(f"*{ext}"):
                     file_paths.append(file_path)
-            
+
             if file_paths:
                 added, skipped = self.add_files_to_queue(file_paths, add_to_list=True)
-                
+                msg = f"{added}件のファイルを追加しました。"
                 if skipped > 0:
-                    QMessageBox.information(
-                        self, "フォルダ追加",
-                        f"{added}件のファイルをキューに追加しました。\n{skipped}件のファイルは既にキューに含まれています。"
-                    )
-                elif added > 0:
-                    QMessageBox.information(
-                        self, "フォルダ追加",
-                        f"{added}件のファイルをキューに追加しました。"
-                    )
+                    msg += f"\n{skipped}件は既に追加済みです。"
+                QMessageBox.information(self, "フォルダ追加", msg)
             else:
-                QMessageBox.information(
-                    self, "フォルダ追加",
-                    "選択したフォルダに処理可能なファイルが見つかりませんでした。"
-                )
-                    
-    def clear_files(self):
-        reply = QMessageBox.question(
-            self, "確認", "ファイルリストをクリアしますか？\n（処理中のジョブは影響を受けません）",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.file_list.clear()
-        
+                QMessageBox.information(self, "フォルダ追加", "処理可能なファイルが見つかりませんでした。")
+
     def select_output_dir(self):
         folder = QFileDialog.getExistingDirectory(self, "出力フォルダを選択")
         if folder:
             self.output_dir_edit.setText(folder)
-            
+
     def open_output_directory(self):
         output_dir = Path(self.output_dir_edit.text())
         if output_dir.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_dir.absolute())))
         else:
             QMessageBox.warning(self, "警告", "出力ディレクトリが存在しません。")
-            
+
     def start_processing(self):
-        # キューにジョブがない場合は警告
         if len(self.jobs) == 0:
             QMessageBox.warning(self, "警告", "処理するファイルを追加してください。")
             return
-        
-        # 既に処理中の場合は何もしない
+
         if self.worker.isRunning():
-            QMessageBox.information(
-                self, "処理中",
-                "既に処理が実行中です。処理完了を待つか、停止ボタンで停止してください。"
-            )
+            QMessageBox.information(self, "処理中", "既に処理が実行中です。")
             return
-        
-        # 処理開始時
-        self.reset_phase_progress()
-        
-        # 既にキューに追加されているジョブをワーカーのキューに追加
-        # （ファイル追加時にワーカーのキューには追加していないため）
+
         for job in self.jobs:
             self.worker.add_job(job)
-        
+
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
-        
+        self.stop_btn.setVisible(True)
+        self.new_session_btn.setVisible(False)
+
         if self.jobs:
-            first_file = str(self.jobs[0].file_path)
-            self.start_processing_timer(first_file)
-        
+            self.start_processing_timer(str(self.jobs[0].file_path))
+
         self.worker.start()
-        
+
     def stop_processing(self):
         self.worker.stop_processing()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        
-    def update_progress(self, file_path: str, progress: float, stage: str):
-        self.current_file_label.setText(f"処理中: {Path(file_path).name}")
-        self.progress_bar.setValue(int(progress))
-        self.stage_label.setText(stage)
-        
-        for i in range(self.results_table.rowCount()):
-            if self.results_table.item(i, 0).text() == Path(file_path).name:
-                self.results_table.setItem(i, 1, QTableWidgetItem(f"{stage} ({progress:.1f}%)"))
-                break
-                
-    def update_phase_progress(self, file_path: str, phase_index: int, progress: float, phase_name: str):
-        """Update progress for a specific phase"""
-        phase_bars = [self.phase0_progress, self.phase1_progress, self.phase2_progress, self.phase3_progress]
-        phase_labels = [self.phase0_status, self.phase1_status, self.phase2_status, self.phase3_status]
-        
-        for i, (bar, label) in enumerate(zip(phase_bars, phase_labels)):
-            if i < phase_index:
-                bar.setValue(100)
-                label.setText("完了")
-            elif i == phase_index:
-                bar.setValue(int(progress))
-                label.setText(f"{phase_name} ({progress:.1f}%)")
-            else:
-                bar.setValue(0)
-                label.setText("待機中")
-        
-        overall_progress = (phase_index * 100 + progress) / 4
-        self.progress_bar.setValue(int(overall_progress))
-        
-        file_name = Path(file_path).name
-        for i in range(self.results_table.rowCount()):
-            if self.results_table.item(i, 0).text() == file_name:
-                self.results_table.setItem(i, 1, QTableWidgetItem(f"{phase_name} ({progress:.1f}%)"))
-                break
-                
-    def update_queue_count(self, count: int):
-        """ワーカーからのキュー更新シグナルを受け取る"""
+
+    def reset_for_new_session(self):
+        """ファイルリストとジョブをクリアして初期状態に戻す（設定は保持）"""
+        # ウィジェットをすべて削除
+        for file_path, widget in list(self.file_widgets.items()):
+            self.files_layout.removeWidget(widget)
+            widget.deleteLater()
+        self.file_widgets.clear()
+        self.jobs.clear()
+
+        self.no_files_label.setVisible(True)
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+        self.new_session_btn.setVisible(False)
         self.update_queue_display()
-    
+
+    def update_progress(self, file_path: str, progress: float, stage: str):
+        widget = self.file_widgets.get(file_path)
+        if widget:
+            widget.status_badge.setText(stage)
+
+    def update_phase_progress(self, file_path: str, phase_index: int, progress: float, phase_name: str):
+        widget = self.file_widgets.get(file_path)
+        if widget:
+            widget.update_phase(phase_index, progress, phase_name)
+
+    def update_queue_count(self, count: int):
+        self.update_queue_display()
+
     def update_queue_display(self):
-        """キュー件数をナンバリング表示で更新"""
         total_jobs = len(self.jobs)
-        queue_size = self.worker.jobs.qsize()
-        current_index = 0
-        
-        # 現在処理中のファイルがある場合
+
         if self.worker.current_job:
             current_index = 1
-            # 現在処理中のファイルがself.jobsの何番目か確認
             for i, job in enumerate(self.jobs):
                 if str(job.file_path) == str(self.worker.current_job.file_path):
                     current_index = i + 1
                     break
-        
-        if total_jobs == 0:
-            self.queue_label.setText("キュー: 0件")
-        elif current_index > 0:
-            self.queue_label.setText(f"キュー: {current_index}件目/{total_jobs}件")
+            self.queue_label.setText(f"{current_index}件目/{total_jobs}件")
+        elif total_jobs == 0:
+            self.queue_label.setText("0件")
         else:
-            self.queue_label.setText(f"キュー: {total_jobs}件")
-        
-    def reset_phase_progress(self):
-        """Reset all phase progress bars to initial state"""
-        phase_bars = [self.phase0_progress, self.phase1_progress, self.phase2_progress, self.phase3_progress]
-        phase_labels = [self.phase0_status, self.phase1_status, self.phase2_status, self.phase3_status]
-        
-        for bar, label in zip(phase_bars, phase_labels):
-            bar.setValue(0)
-            label.setText("待機中")
-        
-        self.progress_bar.setValue(0)
-        self.stage_label.setText("")
-        
+            self.queue_label.setText(f"{total_jobs}件")
+
     def job_completed(self, file_path: str, result: Dict[str, Any]):
-        file_name = Path(file_path).name
-        
         if self.current_processing_file == file_path:
             self.stop_processing_timer()
-        
-        # 処理されたジョブの設定を取得
+
         job_preset = None
+        processing_time = result.get('processing_time', 0)
         for job in self.jobs:
             if str(job.file_path) == file_path:
                 job_preset = job.settings_preset
                 break
-        
-        # 話者分離が有効で、かつ結果にdiarizationが含まれていない場合
+
         diarization_skipped = False
         if job_preset:
             diarization_skipped = job_preset.enable_diarization and not result.get('diarization')
-        
-        # トークンが設定されているか確認
-        import os
-        token = os.getenv("HUGGINGFACE_TOKEN")
-        has_token = bool(token)
-        
-        for i in range(self.results_table.rowCount()):
-            if self.results_table.item(i, 0).text() == file_name:
-                if diarization_skipped:
-                    self.results_table.setItem(i, 1, QTableWidgetItem("完了 (話者分離スキップ)"))
-                    # トークンが設定されていない場合のみメッセージを表示
-                    if not has_token and not hasattr(self, '_diarization_warning_shown'):
-                        self._diarization_warning_shown = True
-                        QMessageBox.information(
-                            self, "話者分離について", 
-                            "話者分離機能を使用するには、.envファイルにHUGGINGFACE_TOKENを設定してください。\n\n"
-                            "設定方法:\n"
-                            "1. プロジェクトルートに.envファイルを作成\n"
-                            "2. HUGGINGFACE_TOKEN=hf_your_token_here を追加\n"
-                            "3. Hugging Face (https://huggingface.co) でトークンを取得"
-                        )
-                else:
-                    self.results_table.setItem(i, 1, QTableWidgetItem("完了"))
-                self.results_table.setItem(i, 2, QTableWidgetItem(f"{result.get('processing_time', 0):.2f}秒"))
-                
-                output_dir = Path(self.get_current_preset().output_dir) / f"output_{Path(file_path).stem}"
-                csv_files = list(output_dir.glob("*.csv"))
-                if csv_files:
-                    self.results_table.setItem(i, 3, QTableWidgetItem(f"{len(csv_files)} CSVファイル"))
-                break
-        
-        # キュー表示を更新
+
+        widget = self.file_widgets.get(file_path)
+        if widget:
+            widget.set_completed(f"{processing_time:.1f}秒", diarization_skipped=diarization_skipped)
+
         self.update_queue_display()
-        
-        # ワーカースレッドが実行中で、まだキューにジョブがある場合は何もしない（自動処理される）
-        # ワーカースレッドが停止していて、キューが空の場合は完了処理
+
+        # すべて完了したか確認
         queue_size = self.worker.jobs.qsize()
-        
+
         if queue_size == 0 and not self.worker.isRunning():
-            # すべての処理が完了
-            self.start_btn.setEnabled(True)
+            self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(False)
-            self.current_file_label.setText("すべての処理が完了しました")
-            self.progress_bar.setValue(100)
-            self.stage_label.setText("完了")
+            self.new_session_btn.setVisible(True)
             self.refresh_history()
             self.update_queue_display()
-            
-            # ファイルリストとジョブリストは保持する（クリアしない）
-            # ユーザーが手動でクリアできるようにする
         elif queue_size > 0:
-            # まだキューにジョブが残っている
-            # 次のジョブのタイマーを開始（ワーカースレッドが自動処理する）
             try:
-                # キューから次のジョブを確認（取り出さない）
                 temp_jobs = []
                 next_job = None
                 while not self.worker.jobs.empty():
@@ -1219,42 +1153,42 @@ class MainWindow(QMainWindow):
                     temp_jobs.append(job)
                     if next_job is None:
                         next_job = job
-                
-                # ジョブを戻す
                 for job in temp_jobs:
                     self.worker.jobs.put(job)
-                
                 if next_job:
                     self.start_processing_timer(str(next_job.file_path))
             except Exception as e:
                 print(f"Error checking next job: {e}")
-            
+
     def job_failed(self, file_path: str, error: str):
-        file_name = Path(file_path).name
-        
-        for i in range(self.results_table.rowCount()):
-            if self.results_table.item(i, 0).text() == file_name:
-                self.results_table.setItem(i, 1, QTableWidgetItem("エラー"))
-                self.results_table.setItem(i, 3, QTableWidgetItem(error))
-                break
-                
-        QMessageBox.warning(self, "処理エラー", f"ファイル '{file_name}' の処理中にエラーが発生しました:\n{error}")
-    
-    def on_diarization_skipped(self, file_path: str, reason: str):
-        """話者分離がスキップされた時に呼ばれる"""
-        file_name = Path(file_path).name
+        if self.current_processing_file == file_path:
+            self.stop_processing_timer()
+
+        widget = self.file_widgets.get(file_path)
+        if widget:
+            widget.set_error(error)
+
+        # すべて完了したか確認（エラーも完了扱い）
+        queue_size = self.worker.jobs.qsize()
+        if queue_size == 0 and not self.worker.isRunning():
+            self.start_btn.setEnabled(False)
+            self.stop_btn.setEnabled(False)
+            self.new_session_btn.setVisible(True)
+            self.refresh_history()
+
         QMessageBox.warning(
-            self, 
-            "話者分離がスキップされました", 
-            f"ファイル '{file_name}' の話者分離がスキップされました。\n\n"
-            f"原因:\n{reason}\n\n"
-            f"詳細はコンソール出力を確認してください。"
+            self, "処理エラー",
+            f"ファイル '{Path(file_path).name}' の処理中にエラーが発生しました:\n{error}"
         )
-        
+
+    def on_diarization_skipped(self, file_path: str, reason: str):
+        """話者分離スキップ - ウィジェットのステータスで表示するのみ（ポップアップなし）"""
+        pass
+
     def refresh_history(self):
         results = self.results_db.get_recent_results()
         self.history_table.setRowCount(len(results))
-        
+
         for i, result in enumerate(results):
             self.history_table.setItem(i, 0, QTableWidgetItem(Path(result['file_path']).name))
             self.history_table.setItem(i, 1, QTableWidgetItem(result['project_name'] or ""))
@@ -1263,18 +1197,7 @@ class MainWindow(QMainWindow):
             self.history_table.setItem(i, 4, QTableWidgetItem(f"{result['processing_time']:.2f}秒" if result['processing_time'] else ""))
             self.history_table.setItem(i, 5, QTableWidgetItem(result['estimated_language'] or ""))
             self.history_table.setItem(i, 6, QTableWidgetItem(f"{result['audio_duration']:.2f}秒" if result['audio_duration'] else ""))
-            
-            if result['processing_time'] and result['estimated_language']:
-                tooltip_text = f"処理時間: {result['processing_time']:.2f} 秒\n"
-                tooltip_text += f"推定言語: {result['estimated_language']}\n"
-                tooltip_text += f"音声長: {result['audio_duration']:.2f} 秒\n"
-                tooltip_text += f"単語タイムスタンプ: {result['word_timestamps'] or 'なし'}\n"
-                tooltip_text += f"{result['vad_settings'] or 'VAD: OFF'}"
-                
-                for col in range(7):
-                    if self.history_table.item(i, col):
-                        self.history_table.item(i, col).setToolTip(tooltip_text)
-            
+
     def clear_history(self):
         reply = QMessageBox.question(
             self, "確認", "処理履歴をすべて削除しますか？",
@@ -1287,31 +1210,23 @@ class MainWindow(QMainWindow):
             conn.close()
             self.refresh_history()
             QMessageBox.information(self, "削除完了", "処理履歴を削除しました。")
-    
+
     def update_timer_display(self, file_path: str, elapsed_seconds: float):
-        """Update real-time processing time in results table"""
-        file_name = Path(file_path).name
-        for i in range(self.results_table.rowCount()):
-            if self.results_table.item(i, 0).text() == file_name:
-                self.results_table.setItem(i, 2, QTableWidgetItem(f"{elapsed_seconds:.1f}秒 (処理中)"))
-                break
+        widget = self.file_widgets.get(file_path)
+        if widget:
+            widget.update_time(elapsed_seconds)
 
     def update_processing_time(self):
-        """Called by QTimer to update processing time display"""
         if self.current_processing_file and self.processing_start_time:
-            import time
             elapsed = time.time() - self.processing_start_time
             self.update_timer_display(self.current_processing_file, elapsed)
 
     def start_processing_timer(self, file_path: str):
-        """Start the processing timer for a file"""
-        import time
         self.current_processing_file = file_path
         self.processing_start_time = time.time()
-        self.processing_timer.start(500)  # Update every 500ms
+        self.processing_timer.start(500)
 
     def stop_processing_timer(self):
-        """Stop the processing timer"""
         self.processing_timer.stop()
         self.current_processing_file = None
         self.processing_start_time = None
@@ -1319,21 +1234,21 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("FWhisper Batch GUI v2")
-    app.setOrganizationName("FWhisper")
-    
+    app.setApplicationName("KoeScribe")
+    app.setOrganizationName("KoeScribe")
+
     window = MainWindow()
     window.show()
-    
+
     if not VideoConverter.is_ffmpeg_available():
         QMessageBox.warning(
-            window, "FFmpeg未検出", 
+            window, "FFmpeg未検出",
             "FFmpegがインストールされていないか、PATHに設定されていません。\n\n"
             "動画ファイルの変換機能は使用できません。WAVファイルのみ処理可能です。\n\n"
             "動画ファイルを処理したい場合は、FFmpegをインストールしてください:\n"
             "https://ffmpeg.org/download.html"
         )
-    
+
     sys.exit(app.exec())
 
 
