@@ -109,7 +109,7 @@ class SettingsPreset:
     use_vad: bool = True
     min_silence_ms: int = 500
     enable_diarization: bool = True
-    diarize_model: str = "pyannote/speaker-diarization"
+    diarize_model: str = "pyannote/speaker-diarization-3.1"
     diarize_min_dur: float = 0.8
     diarize_bridge_gap: float = 0.3
     max_speakers: int = 2
@@ -210,6 +210,7 @@ class TranscriptionWorker(QThread):
     job_completed = Signal(str, dict)
     job_failed = Signal(str, str)
     queue_updated = Signal(int)
+    diarization_skipped = Signal(str, str)  # file_path, reason
     
     def __init__(self):
         super().__init__()
@@ -367,10 +368,25 @@ class TranscriptionWorker(QThread):
             self.phase_progress_updated.emit(str(job.file_path), 2, 10.0, "話者分離モデル読み込み中")
             time.sleep(0.1)  # Small delay to show progress
             
-            words_file = output_dir / f"{job.file_path.stem}_words.csv"
-            segments_file = output_dir / f"{job.file_path.stem}_segments.csv"
+            words_file = output_dir / f"{audio_file.stem}_words.csv"
+            segments_file = output_dir / f"{audio_file.stem}_segments.csv"
             
-            if not words_file.exists() or not segments_file.exists():
+            # ファイル存在チェック（詳細なエラーメッセージ付き）
+            missing_files = []
+            if not words_file.exists():
+                missing_files.append(f"words.csv ({words_file})")
+            if not segments_file.exists():
+                missing_files.append(f"segments.csv ({segments_file})")
+            
+            if missing_files:
+                error_msg = f"話者分離に必要なファイルが見つかりません:\n" + "\n".join(f"  - {f}" for f in missing_files)
+                print(f"[warning] {error_msg}")
+                print(f"[warning] 文字起こしが正常に完了していない可能性があります。")
+                return None
+            
+            # ファイルが空でないか確認
+            if words_file.stat().st_size == 0:
+                print(f"[warning] {words_file} が空です。単語タイムスタンプが生成されていない可能性があります。")
                 return None
             
             self.phase_progress_updated.emit(str(job.file_path), 2, 30.0, "音声データ解析中")
@@ -378,8 +394,16 @@ class TranscriptionWorker(QThread):
             words_df = pd.read_csv(words_file, encoding='utf-8-sig')
             words = words_df.to_dict('records')
             
+            if not words:
+                print(f"[warning] {words_file} に単語データが含まれていません。話者分離をスキップします。")
+                return None
+            
             segments_df = pd.read_csv(segments_file, encoding='utf-8-sig')
             segments = segments_df.to_dict('records')
+            
+            if not segments:
+                print(f"[warning] {segments_file} にセグメントデータが含まれていません。話者分離をスキップします。")
+                return None
             
             self.phase_progress_updated.emit(str(job.file_path), 2, 55.0, "話者埋め込み抽出中")
             
@@ -391,16 +415,27 @@ class TranscriptionWorker(QThread):
             
             self.phase_progress_updated.emit(str(job.file_path), 2, 95.0, "話者ラベル統合中")
             
-            # トークンが設定されているが失敗した場合は、結果にフラグを追加
-            if not result and has_token:
-                # トークンは設定されているが、他の理由で失敗した可能性
-                # メッセージは表示しない（トークン設定の問題ではない）
-                pass
+            # エラーメッセージの改善
+            if not result:
+                if not has_token:
+                    reason = "HUGGINGFACE_TOKENが設定されていないか、モデルがローカルキャッシュにありません。\n解決方法: .envファイルにHUGGINGFACE_TOKENを設定してください。"
+                    print(f"[warning] 話者分離がスキップされました。")
+                    print(f"[warning] 原因: {reason}")
+                else:
+                    reason = "話者分離処理中にエラーが発生した可能性があります。\n詳細はコンソール出力を確認してください。"
+                    print(f"[warning] 話者分離がスキップされました。")
+                    print(f"[warning] 原因: {reason}")
+                
+                # GUIに通知
+                self.diarization_skipped.emit(str(job.file_path), reason)
             
             return result
             
         except Exception as e:
-            print(f"[warning] Diarization failed: {e}")
+            error_msg = f"話者分離処理中にエラーが発生しました: {str(e)}"
+            print(f"[error] {error_msg}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def _convert_to_csv(self, output_dir: Path, stem: str, result: Dict[str, Any]):
@@ -779,6 +814,7 @@ class MainWindow(QMainWindow):
         self.worker.job_completed.connect(self.job_completed)
         self.worker.job_failed.connect(self.job_failed)
         self.worker.queue_updated.connect(self.update_queue_count)
+        self.worker.diarization_skipped.connect(self.on_diarization_skipped)
         
         self.refresh_history_btn.clicked.connect(self.refresh_history)
         self.clear_history_btn.clicked.connect(self.clear_history)
@@ -1203,6 +1239,17 @@ class MainWindow(QMainWindow):
                 break
                 
         QMessageBox.warning(self, "処理エラー", f"ファイル '{file_name}' の処理中にエラーが発生しました:\n{error}")
+    
+    def on_diarization_skipped(self, file_path: str, reason: str):
+        """話者分離がスキップされた時に呼ばれる"""
+        file_name = Path(file_path).name
+        QMessageBox.warning(
+            self, 
+            "話者分離がスキップされました", 
+            f"ファイル '{file_name}' の話者分離がスキップされました。\n\n"
+            f"原因:\n{reason}\n\n"
+            f"詳細はコンソール出力を確認してください。"
+        )
         
     def refresh_history(self):
         results = self.results_db.get_recent_results()

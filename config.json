@@ -11,7 +11,7 @@
   "min_silence_ms": 500,
   "language": "ja",
 
-  "diarize_model": "pyannote/speaker-diarization",
+  "diarize_model": "pyannote/speaker-diarization-3.1",
   "diarize_min_dur": 0.8,
   "diarize_bridge_gap": 0.3
 }

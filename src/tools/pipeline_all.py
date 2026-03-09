@@ -12,10 +12,66 @@ from tools.diarize import diarize_one
 from tools.merge_speakers import assign_speakers_to_words, to_runs
 
 def write_csv(path: Path, rows):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if rows:
-        df = pd.DataFrame(rows)
-        df.to_csv(path, index=False, encoding='utf-8-sig')
+    """
+    CSVファイルを書き込む。権限エラーなどの問題を適切に処理する。
+    """
+    try:
+        # ディレクトリを作成
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if rows:
+            df = pd.DataFrame(rows)
+            
+            # 既存のファイルが読み取り専用の場合、属性を変更してから削除を試みる
+            if path.exists():
+                try:
+                    # Windowsで読み取り専用属性を解除
+                    import os
+                    if os.name == 'nt':  # Windows
+                        import stat
+                        current_attrs = path.stat().st_file_attributes
+                        if current_attrs & stat.FILE_ATTRIBUTE_READONLY:
+                            path.chmod(stat.S_IWRITE)
+                except Exception:
+                    pass  # 属性変更に失敗しても続行
+            
+            # 一時ファイルに書き込んでからリネーム（アトミック書き込み）
+            temp_path = path.with_suffix('.tmp')
+            try:
+                df.to_csv(temp_path, index=False, encoding='utf-8-sig')
+                # 既存ファイルがあれば削除
+                if path.exists():
+                    path.unlink()
+                # 一時ファイルをリネーム
+                temp_path.rename(path)
+            except PermissionError as e:
+                # 一時ファイルをクリーンアップ
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                    except:
+                        pass
+                raise PermissionError(
+                    f"ファイル '{path}' への書き込み権限がありません。\n"
+                    f"考えられる原因:\n"
+                    f"  1. ファイルが他のプログラム（Excel、テキストエディタなど）で開かれています\n"
+                    f"  2. ファイルが読み取り専用になっています\n"
+                    f"  3. ディレクトリへの書き込み権限がありません\n"
+                    f"  4. ウイルス対策ソフトがブロックしています\n"
+                    f"\n解決方法:\n"
+                    f"  - ファイルを開いているプログラムをすべて閉じてください\n"
+                    f"  - ファイルのプロパティで読み取り専用を解除してください\n"
+                    f"  - 管理者権限で実行してみてください\n"
+                    f"  元のエラー: {str(e)}"
+                )
+    except PermissionError:
+        raise  # 上で処理したPermissionErrorを再発生
+    except Exception as e:
+        raise Exception(
+            f"CSVファイル '{path}' の書き込みに失敗しました: {str(e)}\n"
+            f"ファイルパス: {path}\n"
+            f"ディレクトリの書き込み権限を確認してください。"
+        )
 
 def asr_words(model: WhisperModel, audio_path: Path, language: str, beam_size: int):
     segs, info = model.transcribe(
@@ -40,7 +96,7 @@ def main():
     ap.add_argument("--model-size", default="large-v3")
     ap.add_argument("--language", default="ja")
     ap.add_argument("--beam-size", type=int, default=5)
-    ap.add_argument("--diarize-model", default="pyannote/speaker-diarization")
+    ap.add_argument("--diarize-model", default="pyannote/speaker-diarization-3.1")
     ap.add_argument("--min-dur", type=float, default=0.8)
     ap.add_argument("--bridge-gap", type=float, default=0.3)
     args = ap.parse_args()

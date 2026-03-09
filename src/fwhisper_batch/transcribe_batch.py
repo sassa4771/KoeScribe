@@ -48,10 +48,66 @@ def load_config(path: Path) -> Dict[str, Any]:
 
 
 def write_csv(path: Path, rows: List[Dict[str, Any]]):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if rows:
-        df = pd.DataFrame(rows)
-        df.to_csv(path, index=False, encoding='utf-8-sig')
+    """
+    CSVファイルを書き込む。権限エラーなどの問題を適切に処理する。
+    """
+    try:
+        # ディレクトリを作成
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if rows:
+            df = pd.DataFrame(rows)
+            
+            # 既存のファイルが読み取り専用の場合、属性を変更してから削除を試みる
+            if path.exists():
+                try:
+                    # Windowsで読み取り専用属性を解除
+                    import os
+                    if os.name == 'nt':  # Windows
+                        import stat
+                        current_attrs = path.stat().st_file_attributes
+                        if current_attrs & stat.FILE_ATTRIBUTE_READONLY:
+                            path.chmod(stat.S_IWRITE)
+                except Exception:
+                    pass  # 属性変更に失敗しても続行
+            
+            # 一時ファイルに書き込んでからリネーム（アトミック書き込み）
+            temp_path = path.with_suffix('.tmp')
+            try:
+                df.to_csv(temp_path, index=False, encoding='utf-8-sig')
+                # 既存ファイルがあれば削除
+                if path.exists():
+                    path.unlink()
+                # 一時ファイルをリネーム
+                temp_path.rename(path)
+            except PermissionError as e:
+                # 一時ファイルをクリーンアップ
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                    except:
+                        pass
+                raise PermissionError(
+                    f"ファイル '{path}' への書き込み権限がありません。\n"
+                    f"考えられる原因:\n"
+                    f"  1. ファイルが他のプログラム（Excel、テキストエディタなど）で開かれています\n"
+                    f"  2. ファイルが読み取り専用になっています\n"
+                    f"  3. ディレクトリへの書き込み権限がありません\n"
+                    f"  4. ウイルス対策ソフトがブロックしています\n"
+                    f"\n解決方法:\n"
+                    f"  - ファイルを開いているプログラムをすべて閉じてください\n"
+                    f"  - ファイルのプロパティで読み取り専用を解除してください\n"
+                    f"  - 管理者権限で実行してみてください\n"
+                    f"  元のエラー: {str(e)}"
+                )
+    except PermissionError:
+        raise  # 上で処理したPermissionErrorを再発生
+    except Exception as e:
+        raise Exception(
+            f"CSVファイル '{path}' の書き込みに失敗しました: {str(e)}\n"
+            f"ファイルパス: {path}\n"
+            f"ディレクトリの書き込み権限を確認してください。"
+        )
 
 
 def is_diarization_enabled(cfg: Dict[str, Any]) -> bool:
@@ -72,24 +128,64 @@ def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], word
         # ただし、初回ダウンロード時はトークンが必要
         
         spans_path = out_dir / "spans.csv"
-        diarize_model = cfg.get("diarize_model", "pyannote/speaker-diarization")
+        diarize_model = cfg.get("diarize_model", "pyannote/speaker-diarization-3.1")
         min_dur = float(cfg.get("diarize_min_dur", 0.8))
         bridge_gap = float(cfg.get("diarize_bridge_gap", 0.3))
         
+        # 入力データの検証
+        if not words:
+            print(f"[warning] 話者分離をスキップ: 単語データが空です。")
+            return None
+        
+        if not segments:
+            print(f"[warning] 話者分離をスキップ: セグメントデータが空です。")
+            return None
+        
         try:
+            print(f"[info] 話者分離を実行中: {audio_path.name}")
             diarize_one(audio_path, spans_path, diarize_model, token, min_dur, bridge_gap)
+            print(f"[info] 話者分離完了: spans.csv を生成しました")
         except Exception as e:
-            if not token:
-                print(f"[warning] HUGGINGFACE_TOKEN not set, and model not in local cache.")
-                print(f"  初回ダウンロード時はトークンが必要です。エラー: {str(e)}")
+            error_msg = str(e)
+            import traceback
+            full_traceback = traceback.format_exc()
+            
+            # use_auth_tokenエラーの場合、特別なメッセージを表示
+            if "use_auth_token" in error_msg:
+                print(f"[error] 話者分離エラー: use_auth_tokenパラメータが非推奨です")
+                print(f"[error] これはpyannote.audioのバージョン互換性の問題です。")
+                print(f"[error] 解決方法:")
+                print(f"[error]  1. pyannote.audioを最新版に更新: uv pip install --upgrade pyannote.audio")
+                print(f"[error]  2. または、huggingface_hubを最新版に更新: uv pip install --upgrade huggingface_hub")
+                print(f"[error] 詳細なエラー:")
+                print(full_traceback)
+            elif not token:
+                print(f"[warning] 話者分離がスキップされました。")
+                print(f"[warning] 原因: HUGGINGFACE_TOKENが設定されていないか、モデルがローカルキャッシュにありません。")
+                print(f"[warning] エラー詳細: {error_msg}")
+                print(f"[warning] 解決方法: .envファイルにHUGGINGFACE_TOKENを設定してください。")
             else:
-                print(f"[warning] Diarization failed: {str(e)}")
+                print(f"[warning] 話者分離がスキップされました。")
+                print(f"[warning] エラー詳細: {error_msg}")
+                print(f"[warning] トークンは設定されていますが、認証に失敗した可能性があります。")
+                print(f"[warning] 解決方法: トークンが有効か確認してください（--check-token オプションで確認可能）")
+                print(f"[warning] 詳細なスタックトレース:")
+                print(full_traceback)
             return None
         
         spans = []
         if spans_path.exists():
             df = pd.read_csv(spans_path, encoding='utf-8-sig')
             spans = df.to_dict('records')
+            
+            if not spans:
+                print(f"[warning] 話者分離をスキップ: spans.csv が空です。")
+                return None
+        else:
+            print(f"[warning] 話者分離をスキップ: spans.csv が生成されませんでした。")
+            return None
+        
+        print(f"[info] 話者ラベルを統合中: {len(spans)} 個の話者区間を検出")
         
         labeled_words = assign_speakers_to_words(words, spans, smooth_min_sec=0.6)
         write_csv(out_dir / f"{audio_path.stem}_words_with_speakers.csv", labeled_words)
@@ -97,16 +193,21 @@ def diarize_and_merge(audio_path: Path, out_dir: Path, cfg: Dict[str, Any], word
         labeled_segments = assign_speakers_to_words(segments, spans, smooth_min_sec=0.6)
         write_csv(out_dir / f"{audio_path.stem}_segments_with_speakers.csv", labeled_segments)
         
+        print(f"[info] 話者分離完了: {len(labeled_words)} 単語、{len(labeled_segments)} セグメントに話者ラベルを付与")
+        
         return {
             "words_with_speakers": len(labeled_words),
             "segments_with_speakers": len(labeled_segments)
         }
         
     except ImportError as e:
-        print(f"[warning] Diarization dependencies not available: {e}")
+        print(f"[error] 話者分離の依存関係が利用できません: {e}")
+        print(f"[error] pyannote.audio がインストールされているか確認してください。")
         return None
     except Exception as e:
-        print(f"[warning] Diarization failed for {audio_path.name}: {e}")
+        print(f"[error] 話者分離処理中にエラーが発生しました ({audio_path.name}): {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 

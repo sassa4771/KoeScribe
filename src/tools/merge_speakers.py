@@ -9,10 +9,66 @@ def load_csv(p: Path) -> List[Dict[str, Any]]:
     return df.to_dict('records')
 
 def save_csv(p: Path, rows: List[Dict[str, Any]]):
-    p.parent.mkdir(parents=True, exist_ok=True)
-    if rows:
-        df = pd.DataFrame(rows)
-        df.to_csv(p, index=False, encoding='utf-8-sig')
+    """
+    CSVファイルを書き込む。権限エラーなどの問題を適切に処理する。
+    """
+    try:
+        # ディレクトリを作成
+        p.parent.mkdir(parents=True, exist_ok=True)
+        
+        if rows:
+            df = pd.DataFrame(rows)
+            
+            # 既存のファイルが読み取り専用の場合、属性を変更してから削除を試みる
+            if p.exists():
+                try:
+                    # Windowsで読み取り専用属性を解除
+                    import os
+                    if os.name == 'nt':  # Windows
+                        import stat
+                        current_attrs = p.stat().st_file_attributes
+                        if current_attrs & stat.FILE_ATTRIBUTE_READONLY:
+                            p.chmod(stat.S_IWRITE)
+                except Exception:
+                    pass  # 属性変更に失敗しても続行
+            
+            # 一時ファイルに書き込んでからリネーム（アトミック書き込み）
+            temp_path = p.with_suffix('.tmp')
+            try:
+                df.to_csv(temp_path, index=False, encoding='utf-8-sig')
+                # 既存ファイルがあれば削除
+                if p.exists():
+                    p.unlink()
+                # 一時ファイルをリネーム
+                temp_path.rename(p)
+            except PermissionError as e:
+                # 一時ファイルをクリーンアップ
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                    except:
+                        pass
+                raise PermissionError(
+                    f"ファイル '{p}' への書き込み権限がありません。\n"
+                    f"考えられる原因:\n"
+                    f"  1. ファイルが他のプログラム（Excel、テキストエディタなど）で開かれています\n"
+                    f"  2. ファイルが読み取り専用になっています\n"
+                    f"  3. ディレクトリへの書き込み権限がありません\n"
+                    f"  4. ウイルス対策ソフトがブロックしています\n"
+                    f"\n解決方法:\n"
+                    f"  - ファイルを開いているプログラムをすべて閉じてください\n"
+                    f"  - ファイルのプロパティで読み取り専用を解除してください\n"
+                    f"  - 管理者権限で実行してみてください\n"
+                    f"  元のエラー: {str(e)}"
+                )
+    except PermissionError:
+        raise  # 上で処理したPermissionErrorを再発生
+    except Exception as e:
+        raise Exception(
+            f"CSVファイル '{p}' の書き込みに失敗しました: {str(e)}\n"
+            f"ファイルパス: {p}\n"
+            f"ディレクトリの書き込み権限を確認してください。"
+        )
 
 def overlap(a0: float, a1: float, b0: float, b1: float) -> float:
     """[a0,a1] と [b0,b1] の重なり長さ（秒）"""
