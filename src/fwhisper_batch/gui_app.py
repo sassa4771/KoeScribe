@@ -765,26 +765,22 @@ class MainWindow(QMainWindow):
             "QPushButton:disabled { background-color: #ccc; color: #888; border-radius: 4px; }"
         )
         self.stop_btn = QPushButton("停止")
-        self.stop_btn.setEnabled(False)
+        self.stop_btn.setVisible(False)
         self.stop_btn.setMinimumHeight(36)
         self.stop_btn.setStyleSheet(
-            "QPushButton:enabled { background-color: #f44336; color: white; font-weight: bold; border-radius: 4px; }"
-            "QPushButton:disabled { background-color: #ccc; color: #888; border-radius: 4px; }"
+            "QPushButton { background-color: #f44336; color: white; font-weight: bold; border-radius: 4px; }"
+        )
+        self.new_session_btn = QPushButton("次の処理")
+        self.new_session_btn.setVisible(False)
+        self.new_session_btn.setMinimumHeight(36)
+        self.new_session_btn.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; font-weight: bold; font-size: 13px; border-radius: 4px; }"
         )
         bottom_bar.addStretch()
         bottom_bar.addWidget(self.start_btn)
         bottom_bar.addWidget(self.stop_btn)
+        bottom_bar.addWidget(self.new_session_btn)
         processing_layout.addLayout(bottom_bar)
-
-        # 別ファイル処理ボタン（処理完了後に表示）
-        self.new_session_btn = QPushButton("別のファイルを処理する")
-        self.new_session_btn.setVisible(False)
-        self.new_session_btn.setMinimumHeight(40)
-        self.new_session_btn.setStyleSheet(
-            "background-color: #2196F3; color: white; font-size: 13px; "
-            "font-weight: bold; border-radius: 4px; padding: 6px 20px;"
-        )
-        processing_layout.addWidget(self.new_session_btn)
 
         self.tab_widget.addTab(processing_tab, "処理")
 
@@ -850,6 +846,7 @@ class MainWindow(QMainWindow):
 
         self.refresh_history_btn.clicked.connect(self.refresh_history)
         self.clear_history_btn.clicked.connect(self.clear_history)
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
         self.refresh_preset_list()
 
@@ -987,10 +984,15 @@ class MainWindow(QMainWindow):
             if add_to_list:
                 self._add_file_widget(file_path_str)
 
+            # 処理中なら即座にワーカーキューへ追加
+            if self.worker.isRunning():
+                self.worker.add_job(job)
+
             added_count += 1
 
         if added_count > 0:
-            self.start_btn.setEnabled(True)
+            if not self.worker.isRunning():
+                self.start_btn.setEnabled(True)
             self.new_session_btn.setVisible(False)
             self.update_queue_display()
 
@@ -1054,10 +1056,10 @@ class MainWindow(QMainWindow):
             return
 
         for job in self.jobs:
-            self.worker.add_job(job)
+            if job.status == "待機中":
+                self.worker.add_job(job)
 
         self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
         self.stop_btn.setVisible(True)
         self.new_session_btn.setVisible(False)
 
@@ -1069,7 +1071,7 @@ class MainWindow(QMainWindow):
     def stop_processing(self):
         self.worker.stop_processing()
         self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
+        self.stop_btn.setVisible(False)
 
     def reset_for_new_session(self):
         """ファイルリストとジョブをクリアして初期状態に戻す（設定は保持）"""
@@ -1140,7 +1142,7 @@ class MainWindow(QMainWindow):
 
         if queue_size == 0 and not self.worker.isRunning():
             self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(False)
+            self.stop_btn.setVisible(False)
             self.new_session_btn.setVisible(True)
             self.refresh_history()
             self.update_queue_display()
@@ -1172,7 +1174,7 @@ class MainWindow(QMainWindow):
         queue_size = self.worker.jobs.qsize()
         if queue_size == 0 and not self.worker.isRunning():
             self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(False)
+            self.stop_btn.setVisible(False)
             self.new_session_btn.setVisible(True)
             self.refresh_history()
 
@@ -1184,6 +1186,11 @@ class MainWindow(QMainWindow):
     def on_diarization_skipped(self, file_path: str, reason: str):
         """話者分離スキップ - ウィジェットのステータスで表示するのみ（ポップアップなし）"""
         pass
+
+    def _on_tab_changed(self, index: int):
+        """タブ切り替え時の処理"""
+        if index == 1:  # 履歴タブ
+            self.refresh_history()
 
     def refresh_history(self):
         results = self.results_db.get_recent_results()
